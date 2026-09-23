@@ -17,12 +17,14 @@ public class DatabaseServiceTests : IDisposable
         DayOfWeek.Sunday
     ];
 
+    private readonly TempProfile _profile = new();
     private readonly string _dbPath;
     private readonly string _connString;
 
     public DatabaseServiceTests()
     {
-        _dbPath     = Path.Combine(Path.GetTempPath(), $"tgtest_{Guid.NewGuid():N}.db");
+        Directory.CreateDirectory(_profile.Runtime.Paths.Root);
+        _dbPath     = _profile.Runtime.Paths.DatabasePath;
         _connString = $"Data Source={_dbPath};";
     }
 
@@ -341,6 +343,6 @@ public class DatabaseServiceTests : IDisposable
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
+        _profile.Dispose();
     }
 }

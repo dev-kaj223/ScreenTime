@@ -18,15 +18,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
 
     private FlaUI.Core.AutomationElements.Window OpenSettingsWindow()
     {
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL);
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.SHIFT);
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_G);
-        Thread.Sleep(100);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_G);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.SHIFT);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL);
+        _fx.RequestSettings();
 
         var prompt = _fx.App.WaitForWindow(_fx.Automation, "Parent Access");
 

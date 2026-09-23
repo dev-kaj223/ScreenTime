@@ -17,15 +17,7 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
     private FlaUI.Core.AutomationElements.Window OpenDashboard()
     {
         // Open settings the same way SettingsWindowTests does
-        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL);
-        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
-        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.SHIFT);
-        FlaUI.Core.Input.Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_G);
-        Thread.Sleep(100);
-        FlaUI.Core.Input.Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_G);
-        FlaUI.Core.Input.Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.SHIFT);
-        FlaUI.Core.Input.Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
-        FlaUI.Core.Input.Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL);
+        _fx.RequestSettings();
 
         var prompt = _fx.App.WaitForWindow(_fx.Automation, "Parent Access");
         var boxes = prompt.FindAllDescendants(cf => cf.ByFrameworkId("WPF")

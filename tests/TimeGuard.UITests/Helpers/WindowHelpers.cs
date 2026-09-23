@@ -25,7 +25,12 @@ public static class WindowHelpers
                 var match = windows.FirstOrDefault(w =>
                     w.Title?.Contains(titleContains, StringComparison.OrdinalIgnoreCase) == true);
                 if (match is not null)
+                {
+                    // Test-profile signals do not grant foreground activation like a global hotkey.
+                    // Direct keyboard input only to the fixture-owned window returned by FlaUI.
+                    match.SetForeground();
                     return match;
+                }
             }
             catch { /* window not ready yet */ }
             Thread.Sleep(100);

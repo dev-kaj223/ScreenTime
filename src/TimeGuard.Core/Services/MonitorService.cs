@@ -11,11 +11,21 @@ namespace TimeGuard.Services;
 ///   4. Calls RulesEngine to get actions
 ///   5. Fires events so App.xaml.cs can show popups and kill processes
 /// </summary>
-public sealed class MonitorService : IDisposable
+public sealed class MonitorService : IDisposable, IAsyncDisposable
 {
     private readonly DatabaseService _db;
     private readonly RulesEngine     _rules;
     private readonly CancellationTokenSource _cts = new();
+    private readonly object _lifecycleGate = new();
+    private readonly IAppLogger? _logger;
+    private readonly Func<Dictionary<string, string>> _processSnapshot;
+    private Task? _worker;
+    private bool _stopped;
+    private bool _cancellationDisposed;
+
+    public Task Completion { get { lock (_lifecycleGate) return _worker ?? Task.CompletedTask; } }
+    public Exception? LastFault { get; private set; }
+    public CancellationToken StoppingToken { get; }
 
     private AppConfig _config;
     private DailyLog  _log;
@@ -30,16 +40,73 @@ public sealed class MonitorService : IDisposable
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private const double PollMinutes = 5.0 / 60.0;
 
-    public MonitorService(DatabaseService db, RulesEngine rules, AppConfig config)
+    public MonitorService(DatabaseService db, RulesEngine rules, AppConfig config, IAppLogger? logger = null)
+        : this(db, rules, config, logger, GetAllWindowedProcessNames) { }
+
+    internal MonitorService(DatabaseService db, RulesEngine rules, AppConfig config,
+        IAppLogger? logger, Func<Dictionary<string, string>> processSnapshot)
     {
         _db     = db;
         _rules  = rules;
         _config = config;
+        _logger = logger;
+        _processSnapshot = processSnapshot;
+        StoppingToken = _cts.Token;
         _log    = db.LoadTodayLog();
         db.PurgeOldPassiveSessions(7);
     }
 
-    public void Start() => Task.Run(() => RunLoop(_cts.Token));
+    public void Start()
+    {
+        lock (_lifecycleGate)
+        {
+            if (_stopped) throw new ObjectDisposedException(nameof(MonitorService));
+            if (_worker is not null) return; // One worker per service lifetime, including after a fault.
+            _worker = Task.Run(SuperviseAsync);
+            // Observe even if a caller forgets to await Completion. It remains faulted for callers.
+            _ = _worker.ContinueWith(t => { _ = t.Exception; }, CancellationToken.None,
+                TaskContinuationOptions.OnlyOnFaulted | TaskContinuationOptions.ExecuteSynchronously,
+                TaskScheduler.Default);
+        }
+    }
+
+    private async Task SuperviseAsync()
+    {
+        _logger.TryWrite("Information", "MonitorStarted");
+        try
+        {
+            try { await RunLoop(_cts.Token).ConfigureAwait(false); }
+            catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
+            finally { CloseAllSessions(); }
+            _logger.TryWrite("Information", "MonitorStopped");
+        }
+        catch (Exception ex)
+        {
+            LastFault = ex;
+            _logger.TryWrite("Critical", "MonitorFaulted", ex);
+            throw;
+        }
+    }
+
+    public async Task StopAsync()
+    {
+        Task worker;
+        lock (_lifecycleGate)
+        {
+            _stopped = true;
+            if (!_cancellationDisposed) _cts.Cancel();
+            worker = _worker ?? Task.CompletedTask;
+        }
+        try { await worker.ConfigureAwait(false); }
+        finally
+        {
+            lock (_lifecycleGate)
+            {
+                if (!_cancellationDisposed) _cts.Dispose();
+                _cancellationDisposed = true;
+            }
+        }
+    }
 
     public void ReloadConfig(AppConfig config)
     {
@@ -92,80 +159,81 @@ public sealed class MonitorService : IDisposable
 
         while (!ct.IsCancellationRequested)
         {
-            try
+            var today = DateOnly.FromDateTime(DateTime.Now);
+
+            if (today != lastDate)
             {
-                var today = DateOnly.FromDateTime(DateTime.Now);
-
-                if (today != lastDate)
-                {
-                    _log = _db.LoadTodayLog();
-                    CloseAllSessions();
-                    lastDate = today;
-                }
-
-                var runningNames    = GetAllWindowedProcessNames();
-                var ruledRunning    = runningNames.Keys.Where(n => IsRuledProcess(n)).ToList();
-                var now             = TimeOnly.FromDateTime(DateTime.Now);
-
-                AccumulateUsage(runningNames);
-
-                var breakTimers = _sessions.ToDictionary(
-                    kvp => kvp.Key,
-                    kvp => kvp.Value.TimeSinceBreak);
-                var actions = _rules.Evaluate(ruledRunning, _log, _config, now, breakTimers);
-
-                foreach (var action in actions)
-                {
-                    var entry = _log.GetOrCreate(action.ProcessName);
-
-                    if (action.Kind == RulesEngine.ActionKind.Block)
-                    {
-                        entry.Blocked = true;
-                        CloseSession(action.ProcessName);
-                        _db.UpsertUsageEntry(today, entry);
-                        BlockRequested?.Invoke(action.ProcessName, action.DisplayName);
-                    }
-                    else if (action.Kind == RulesEngine.ActionKind.WarnFiveMinutes)
-                    {
-                        entry.WarningSent = true;
-                        _db.UpsertUsageEntry(today, entry);
-                        WarnRequested?.Invoke(action.ProcessName, action.DisplayName);
-                    }
-                    else if (action.Kind == RulesEngine.ActionKind.BreakDue)
-                    {
-                        if (_sessions.TryGetValue(action.ProcessName.ToLowerInvariant(), out var s))
-                            BreakRequested?.Invoke(action.ProcessName, action.DisplayName, s.SessionId);
-                    }
-                }
-
-                foreach (var (procName, displayName) in _rules.GetRelaunched(ruledRunning, _log, _config))
-                    BlockRequested?.Invoke(procName, displayName);
-
-                _log.TotalUsageMinutes = _log.Entries.Sum(e => e.UsageMinutes);
-                if (_config.OverallDailyLimitMinutes > 0 &&
-                    _log.TotalUsageMinutes >= _config.OverallDailyLimitMinutes)
-                    _log.OverallCapHit = true;
+                _log = _db.LoadTodayLog();
+                CloseAllSessions();
+                lastDate = today;
             }
-            catch (Exception ex)
+
+            var runningNames    = _processSnapshot();
+            var ruledRunning    = runningNames.Keys.Where(n => IsRuledProcess(n)).ToList();
+            var now             = TimeOnly.FromDateTime(DateTime.Now);
+
+            AccumulateUsage(runningNames);
+
+            var breakTimers = _sessions.ToDictionary(
+                kvp => kvp.Key,
+                kvp => kvp.Value.TimeSinceBreak);
+            var actions = _rules.Evaluate(ruledRunning, _log, _config, now, breakTimers);
+
+            foreach (var action in actions)
             {
-                File.AppendAllText(
-                    Path.Combine(DatabaseService.DataDir, "error.log"),
-                    $"[{DateTime.Now:O}] {ex}\n");
+                var entry = _log.GetOrCreate(action.ProcessName);
+
+                if (action.Kind == RulesEngine.ActionKind.Block)
+                {
+                    entry.Blocked = true;
+                    CloseSession(action.ProcessName);
+                    _db.UpsertUsageEntry(today, entry);
+                    BlockRequested?.Invoke(action.ProcessName, action.DisplayName);
+                }
+                else if (action.Kind == RulesEngine.ActionKind.WarnFiveMinutes)
+                {
+                    entry.WarningSent = true;
+                    _db.UpsertUsageEntry(today, entry);
+                    WarnRequested?.Invoke(action.ProcessName, action.DisplayName);
+                }
+                else if (action.Kind == RulesEngine.ActionKind.BreakDue)
+                {
+                    if (_sessions.TryGetValue(action.ProcessName.ToLowerInvariant(), out var s))
+                        BreakRequested?.Invoke(action.ProcessName, action.DisplayName, s.SessionId);
+                }
             }
+
+            foreach (var (procName, displayName) in _rules.GetRelaunched(ruledRunning, _log, _config))
+                BlockRequested?.Invoke(procName, displayName);
+
+            _log.TotalUsageMinutes = _log.Entries.Sum(e => e.UsageMinutes);
+            if (_config.OverallDailyLimitMinutes > 0 &&
+                _log.TotalUsageMinutes >= _config.OverallDailyLimitMinutes)
+                _log.OverallCapHit = true;
 
             await Task.Delay(PollInterval, ct).ConfigureAwait(false);
         }
     }
 
-    private Dictionary<string, string> GetAllWindowedProcessNames()
+    private static Dictionary<string, string> GetAllWindowedProcessNames()
     {
         // Returns processName (lowercase) → windowTitle for all visible windowed apps
-        return Process.GetProcesses()
-            .Where(p => !string.IsNullOrWhiteSpace(p.MainWindowTitle))
-            .GroupBy(p => p.ProcessName.ToLowerInvariant())
-            .ToDictionary(
-                g => g.Key,
-                g => g.First().MainWindowTitle);
+        var result = new Dictionary<string, string>();
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try
+                {
+                    var title = process.MainWindowTitle;
+                    if (!string.IsNullOrWhiteSpace(title))
+                        result.TryAdd(process.ProcessName.ToLowerInvariant(), title);
+                }
+                catch (InvalidOperationException) { /* Process exited during enumeration. */ }
+                catch (System.ComponentModel.Win32Exception) { /* Inaccessible process. */ }
+            }
+        }
+        return result;
     }
 
     private bool IsRuledProcess(string processNameLower) =>
@@ -231,8 +299,14 @@ public sealed class MonitorService : IDisposable
 
     public void Dispose()
     {
-        CloseAllSessions();
-        _cts.Cancel();
-        _cts.Dispose();
+        // Nonblocking cancellation: a UI caller may be servicing a worker event.
+        // Await StopAsync/DisposeAsync before releasing dependencies.
+        lock (_lifecycleGate)
+        {
+            _stopped = true;
+            if (!_cancellationDisposed) _cts.Cancel();
+        }
     }
+
+    public async ValueTask DisposeAsync() => await StopAsync().ConfigureAwait(false);
 }

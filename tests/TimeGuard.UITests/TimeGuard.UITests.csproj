@@ -27,6 +27,17 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TimeGuard.Core\TimeGuard.Core.csproj" />
+    <ProjectReference Include="..\..\src\TimeGuard.App\TimeGuard.App.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\ScreenTime.TestProcess\ScreenTime.TestProcess.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
+
+  <Target Name="CopyTestApplications" AfterTargets="Build">
+    <ItemGroup>
+      <TestAppFiles Include="..\..\src\TimeGuard.App\bin\$(Configuration)\$(TargetFramework)\**\*" />
+      <TestHelperFiles Include="..\ScreenTime.TestProcess\bin\$(Configuration)\$(TargetFramework)\**\*" />
+    </ItemGroup>
+    <Copy SourceFiles="@(TestAppFiles)" DestinationFiles="@(TestAppFiles->'$(OutDir)App\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(TestHelperFiles)" DestinationFiles="@(TestHelperFiles->'$(OutDir)Helper\%(RecursiveDir)%(Filename)%(Extension)')" SkipUnchangedFiles="true" />
+  </Target>
 
 </Project>

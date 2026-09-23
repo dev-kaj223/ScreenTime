@@ -13,18 +13,21 @@ namespace TimeGuard.UI;
 public partial class SettingsWindow : Window
 {
     private readonly DatabaseService _db;
+    private readonly RuntimeOptions _runtime;
     private ObservableCollection<AppRule> _rules = [];
 
     private record UsageRow(string ProcessName, string UsageMinutesDisplay, bool Blocked);
 
-    public SettingsWindow(DatabaseService db)
+    public SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null)
     {
         InitializeComponent();
         _db = db;
+        _runtime = runtime ?? RuntimeOptions.Development();
         LoadRules();
         LoadUsage();
         LoadGlobalCap();
-        StartupCheckBox.IsChecked = StartupHelper.IsRegistered();
+        StartupCheckBox.IsEnabled = _runtime.AllowsStartup;
+        StartupCheckBox.IsChecked = StartupHelper.IsRegistered(_runtime);
     }
 
     // ── Rules Tab ─────────────────────────────────────────────────────────────
@@ -210,8 +213,8 @@ public partial class SettingsWindow : Window
 
     private void OnStartupToggle(object sender, RoutedEventArgs e)
     {
-        if (StartupCheckBox.IsChecked == true) StartupHelper.Register();
-        else StartupHelper.Unregister();
+        if (StartupCheckBox.IsChecked == true) StartupHelper.Register(_runtime);
+        else StartupHelper.Unregister(_runtime);
     }
 
     // ── Footer ────────────────────────────────────────────────────────────────

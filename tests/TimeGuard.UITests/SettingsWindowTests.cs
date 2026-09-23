@@ -18,22 +18,14 @@ public class SettingsWindowTests : IClassFixture<SeededAppFixture>
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Triggers the settings hotkey (Ctrl+Alt+Shift+G), types the password in the
+    /// Signals this fixture's settings event, types the password in the
     /// PasswordPromptWindow, clicks Unlock, then waits for SettingsWindow.
     /// Returns the SettingsWindow.
     /// </summary>
     private FlaUI.Core.AutomationElements.Window OpenSettingsWindow()
     {
-        // Fire the global hotkey
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL);
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.SHIFT);
-        Keyboard.Press(FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_G);
-        Thread.Sleep(100);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_G);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.SHIFT);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.ALT);
-        Keyboard.Release(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL);
+        // Signal only the fixture-owned application
+        _fx.RequestSettings();
 
         // Wait for PasswordPromptWindow
         var prompt = _fx.App.WaitForWindow(_fx.Automation, "Parent Access");

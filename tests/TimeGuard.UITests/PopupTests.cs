@@ -7,8 +7,8 @@ namespace TimeGuard.UITests;
 
 /// <summary>
 /// Tests the BlockedPopup window.
-/// The fixture seeds a "notepad" rule that is already over-limit, then starts
-/// notepad so MonitorService detects it running and fires BlockRequested.
+/// The fixture seeds a "screentime.testprocess" rule that is already over-limit, then starts
+/// the owned helper so MonitorService detects it running and fires BlockRequested.
 /// </summary>
 public class PopupTests : IClassFixture<PopupTestFixture>
 {
@@ -19,10 +19,11 @@ public class PopupTests : IClassFixture<PopupTestFixture>
     [Fact]
     public void BlockedPopup_ShowsCorrectTitle()
     {
-        _fx.EnsureNotepadRunning();
+        _fx.EnsureHelperRunning();
         var popup = _fx.App.WaitForWindow(_fx.Automation, "Time's Up",
             timeout: TimeSpan.FromSeconds(20));
         Assert.Contains("Time", popup.Title);
+        Assert.True(_fx.HelperExited());
         popup.FindButton("OK").Click(); // close so the next test starts clean
         Thread.Sleep(300);
     }
@@ -30,7 +31,7 @@ public class PopupTests : IClassFixture<PopupTestFixture>
     [Fact]
     public void BlockedPopup_OkButton_ClosesPopup()
     {
-        _fx.EnsureNotepadRunning();
+        _fx.EnsureHelperRunning();
         var popup = _fx.App.WaitForWindow(_fx.Automation, "Time's Up",
             timeout: TimeSpan.FromSeconds(20));
         popup.FindButton("OK").Click();
@@ -43,12 +44,12 @@ public class PopupTests : IClassFixture<PopupTestFixture>
 }
 
 /// <summary>
-/// Fixture that seeds a "notepad" rule already over-limit.
-/// Call <see cref="EnsureNotepadRunning"/> in each test so the monitor detects the process.
+/// Fixture that seeds a "screentime.testprocess" rule already over-limit.
+/// Call <see cref="EnsureHelperRunning"/> in each test so the monitor detects the process.
 /// </summary>
 public class PopupTestFixture : AppFixture
 {
-    private Process? _notepad;
+    private OwnedProcessIdentity? _helper;
 
     protected override void SeedDatabase()
     {
@@ -58,8 +59,8 @@ public class PopupTestFixture : AppFixture
         var db = OpenDb();
         db.SaveRule(new TimeGuard.Models.AppRule
         {
-            ProcessName       = "notepad",
-            DisplayName       = "Notepad",
+            ProcessName       = "screentime.testprocess",
+            DisplayName       = "Test helper",
             DailyLimitMinutes = 1,
             Enabled           = true
         });
@@ -68,23 +69,27 @@ public class PopupTestFixture : AppFixture
         db.UpsertUsageEntry(DateOnly.FromDateTime(DateTime.Today),
             new TimeGuard.Models.UsageEntry
             {
-                ProcessName  = "notepad",
+                ProcessName  = "screentime.testprocess",
                 UsageMinutes = 2.0,
                 Blocked      = false,
                 WarningSent  = false
             });
     }
 
-    /// <summary>Start notepad if it isn't running so the monitor can detect it.</summary>
-    public void EnsureNotepadRunning()
+    /// <summary>Launch a fresh owned helper; the app validates its identity before termination.</summary>
+    public void EnsureHelperRunning()
     {
-        if (Process.GetProcessesByName("notepad").Length == 0)
-            _notepad = Process.Start("notepad.exe");
+        _helper = LaunchHelper();
     }
 
-    public new void Dispose()
+    public bool HelperExited()
     {
-        try { _notepad?.Kill(); } catch { }
-        base.Dispose();
+        if (_helper is null) return false;
+        try
+        {
+            using var process = Process.GetProcessById(_helper.Id);
+            return !_helper.Matches(process);
+        }
+        catch (ArgumentException) { return true; }
     }
 }

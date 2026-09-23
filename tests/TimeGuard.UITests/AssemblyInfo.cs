@@ -1,5 +1,5 @@
 using Xunit;
 
-// UI tests drive a real process — parallel execution causes fixtures to kill
-// each other's processes and race on TIMEGUARD_TEST_DB. Run everything serially.
+// Profiles/processes are isolated, but UI tests still share desktop keyboard/mouse input.
+// Keep those interactions serial.
 [assembly: CollectionBehavior(DisableTestParallelization = true)]

@@ -9,12 +9,13 @@ namespace TimeGuard.Tests;
 /// </summary>
 public class MonitorServiceTests : IDisposable
 {
+    private readonly TempProfile _profile = new();
     private readonly string _dbPath;
     private readonly string _connString;
 
     public MonitorServiceTests()
     {
-        _dbPath     = Path.Combine(Path.GetTempPath(), $"tgmonitor_{Guid.NewGuid():N}.db");
+        _dbPath     = _profile.Runtime.Paths.DatabasePath;
         _connString = $"Data Source={_dbPath};";
     }
 
@@ -172,6 +173,6 @@ public class MonitorServiceTests : IDisposable
 
     public void Dispose()
     {
-        try { File.Delete(_dbPath); } catch { }
+        _profile.Dispose();
     }
 }

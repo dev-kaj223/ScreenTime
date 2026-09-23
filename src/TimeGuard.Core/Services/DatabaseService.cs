@@ -11,20 +11,24 @@ namespace TimeGuard.Services;
 /// </summary>
 public class DatabaseService
 {
-    public static readonly string DataDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData),
-        "TimeGuard");
-
     private readonly string _connectionString;
 
     public DatabaseService(string? connectionString = null)
     {
-        Directory.CreateDirectory(DataDir);
-        _connectionString = connectionString
-            ?? $"Data Source={Path.Combine(DataDir, "timeguard.db")};";
+        var builder = connectionString is null
+            ? new SqliteConnectionStringBuilder { DataSource = RuntimeOptions.Development().Paths.DatabasePath }
+            : new SqliteConnectionStringBuilder(connectionString);
+        // Explicit connections have no dependency on a default profile directory.
+        if (!string.IsNullOrEmpty(builder.DataSource) && builder.DataSource != ":memory:" &&
+            builder.Mode != SqliteOpenMode.Memory)
+            Directory.CreateDirectory(Path.GetDirectoryName(Path.GetFullPath(builder.DataSource))!);
+        _connectionString = builder.ToString();
 
         new DatabaseMigrator(_connectionString).Migrate();
     }
+
+    public DatabaseService(AppDataPaths paths) : this(
+        new SqliteConnectionStringBuilder { DataSource = paths.DatabasePath }.ToString()) { }
 
     private SqliteConnection Open()
     {

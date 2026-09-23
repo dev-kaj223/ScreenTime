@@ -1,138 +1,125 @@
 using System.Diagnostics;
-using System.Reflection;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using FlaUI.Core;
 using FlaUI.UIA3;
+using Microsoft.Data.Sqlite;
 using TimeGuard.Services;
 
 namespace TimeGuard.UITests;
 
-/// <summary>
-/// Base xUnit class fixture — launches TimeGuard.exe with a throw-away temp DB
-/// so tests run in full isolation without touching the real %AppData%\TimeGuard DB.
-///
-/// Subclass <see cref="SeededAppFixture"/> for tests that need a pre-configured
-/// app (password already set, first-run skipped).
-/// </summary>
+/// <summary>Each fixture owns a complete temporary profile and only processes it launches.</summary>
 public class AppFixture : IDisposable
 {
-    /// <summary>
-    /// The password used to seed the test DB and typed into password prompts.
-    /// Set the <c>TIMEGUARD_TEST_PASSWORD</c> environment variable to use your
-    /// own password. Defaults to "test123" for fresh / CI environments.
-    /// </summary>
     public static string TestPassword =>
         Environment.GetEnvironmentVariable("TIMEGUARD_TEST_PASSWORD") ?? "test123";
 
-    private readonly string _dbPath;
-    protected string DbPath => _dbPath;
+    public RuntimeOptions Runtime { get; } = RuntimeOptions.Test(
+        Path.Combine(Path.GetTempPath(), "ScreenTime-tests", Guid.NewGuid().ToString("N")));
+    protected string DbPath => Runtime.Paths.DatabasePath;
     private Application? _app;
     private UIA3Automation? _automation;
-
+    private OwnedProcessIdentity? _appIdentity;
+    private readonly List<OwnedProcessIdentity> _helpers = [];
+    private bool _disposed;
     public Application App => _app ?? throw new InvalidOperationException("App not launched.");
     public UIA3Automation Automation => _automation ?? throw new InvalidOperationException("App not launched.");
 
     public AppFixture()
     {
-        // Unique temp DB so parallel test classes never collide
-        _dbPath = Path.Combine(Path.GetTempPath(), $"timeguard_test_{Guid.NewGuid():N}.db");
-        SeedDatabase();
-        Launch();
+        try { SeedDatabase(); Launch(); }
+        catch { Dispose(); throw; }
     }
 
-    // ── Override in subclasses to pre-populate the DB ────────────────────────
-
-    protected virtual void SeedDatabase() { /* blank DB → first-run flow */ }
-
-    // ── Helpers exposed to subclasses ────────────────────────────────────────
+    protected virtual void SeedDatabase() { }
 
     protected void SaveConfigToDb(string hash, string salt)
     {
-        var db = new DatabaseService($"Data Source={_dbPath};");
+        var db = OpenDb();
         var config = db.LoadConfig();
         config.PasswordHash = hash;
         config.PasswordSalt = salt;
         db.SaveConfig(config);
     }
 
-    protected DatabaseService OpenDb() => new($"Data Source={_dbPath};");
-
+    protected DatabaseService OpenDb() => new(Runtime.Paths);
     public DatabaseService OpenDatabase() => OpenDb();
 
     protected static (string hash, string salt) HashPassword(string password)
     {
         var saltBytes = RandomNumberGenerator.GetBytes(32);
-        var hashBytes = Rfc2898DeriveBytes.Pbkdf2(
-            Encoding.UTF8.GetBytes(password),
-            saltBytes, 100_000,
-            HashAlgorithmName.SHA256, 32);
+        var hashBytes = Rfc2898DeriveBytes.Pbkdf2(Encoding.UTF8.GetBytes(password),
+            saltBytes, 100_000, HashAlgorithmName.SHA256, 32);
         return (Convert.ToBase64String(hashBytes), Convert.ToBase64String(saltBytes));
     }
 
-    // ── Launch / teardown ────────────────────────────────────────────────────
-
     private void Launch()
     {
-        // Kill any stale TimeGuard process so the single-instance mutex is free
-        foreach (var p in Process.GetProcessesByName("TimeGuard"))
-        {
-            try { p.Kill(); p.WaitForExit(2000); } catch { }
-        }
-
-        var exePath = ResolveExePath();
-        var runtimeConfig = Path.Combine(Path.GetDirectoryName(exePath)!, "TimeGuard.runtimeconfig.json");
-        if (!File.Exists(exePath) || !File.Exists(runtimeConfig))
-            BuildApp(exePath);
-
-        // Set env var on THIS process — child processes inherit it even with UseShellExecute=true
-        Environment.SetEnvironmentVariable("TIMEGUARD_TEST_DB", _dbPath);
-
-        var info = new ProcessStartInfo(exePath) { UseShellExecute = true };
-
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "App", "TimeGuard.exe"))
+        { UseShellExecute = false };
+        info.ArgumentList.Add("--test-profile");
+        info.ArgumentList.Add(Runtime.Paths.Root);
+        info.Environment.Remove("TIMEGUARD_TEST_DB");
         _automation = new UIA3Automation();
         _app = Application.Launch(info);
-
-        // Wait for the app to fully init and register the global hotkey
+        using var process = Process.GetProcessById(_app.ProcessId);
+        _appIdentity = OwnedProcessIdentity.Capture(process);
         Thread.Sleep(2500);
+        if (process.HasExited) throw new InvalidOperationException("Isolated app exited during startup.");
     }
 
-    private static string ResolveExePath()
+    public void RequestSettings()
     {
-        // Walk up from test DLL location to find the repo root, then locate the app exe
-        var testDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        // testDir is something like: tests/TimeGuard.UITests/bin/Debug/net8.0-windows/
-        var repoRoot = Path.GetFullPath(Path.Combine(testDir, "..", "..", "..", "..", ".."));
-        return Path.Combine(repoRoot, "src", "TimeGuard.App", "bin", "Debug",
-            "net8.0-windows", "TimeGuard.exe");
+        using var signal = EventWaitHandle.OpenExisting(Runtime.SettingsEventName);
+        signal.Set();
     }
 
-    private static void BuildApp(string exePath)
+    public OwnedProcessIdentity LaunchHelper()
     {
-        var repoRoot = Path.GetFullPath(
-            Path.Combine(Path.GetDirectoryName(exePath)!, "..", "..", "..", ".."));
-        var proc = Process.Start(new ProcessStartInfo("dotnet", $"build \"{repoRoot}\"")
-        {
-            RedirectStandardOutput = true,
-            UseShellExecute = false
-        })!;
-        proc.WaitForExit(60_000);
-        if (!File.Exists(exePath))
-            throw new FileNotFoundException($"TimeGuard.exe not found after build: {exePath}");
+        using var process = Process.Start(new ProcessStartInfo(
+            Path.Combine(AppContext.BaseDirectory, "Helper", "ScreenTime.TestProcess.exe"))
+            { UseShellExecute = false })!; // A visible test window exercises existing title-based discovery.
+        var identity = OwnedProcessIdentity.Capture(process);
+        _helpers.Add(identity);
+        Directory.CreateDirectory(Runtime.Paths.RuntimeDirectory);
+        var staging = Runtime.Paths.OwnedProcessesPath + ".tmp";
+        File.WriteAllText(staging, JsonSerializer.Serialize(_helpers));
+        File.Move(staging, Runtime.Paths.OwnedProcessesPath, overwrite: true);
+        return identity;
     }
 
     public void Dispose()
     {
-        try { _app?.Kill(); } catch { }
-        _automation?.Dispose();
-        try { if (File.Exists(_dbPath)) File.Delete(_dbPath); } catch { }
+        if (_disposed) return;
+        _disposed = true;
+        try
+        {
+            if (_appIdentity is not null)
+            {
+                try
+                {
+                    using var stop = EventWaitHandle.OpenExisting(Runtime.StopEventName);
+                    stop.Set();
+                    using var process = Process.GetProcessById(_appIdentity.Id);
+                    if (_appIdentity.Matches(process)) process.WaitForExit(5000);
+                }
+                catch (WaitHandleCannotBeOpenedException) { /* First-run dialog has no monitor yet. */ }
+                catch (ArgumentException) { /* Already exited. */ }
+                _appIdentity.Terminate();
+            }
+        }
+        finally
+        {
+            foreach (var helper in _helpers) helper.Terminate();
+            _app?.Dispose();
+            _automation?.Dispose();
+            SqliteConnection.ClearAllPools();
+            if (Directory.Exists(Runtime.Paths.Root)) Directory.Delete(Runtime.Paths.Root, recursive: true);
+        }
     }
 }
 
-/// <summary>
-/// Fixture variant that pre-seeds the DB with a known password (<see cref="TestPassword"/>),
-/// so the first-run window is skipped and settings are accessible.
-/// </summary>
 public class SeededAppFixture : AppFixture
 {
     protected override void SeedDatabase()

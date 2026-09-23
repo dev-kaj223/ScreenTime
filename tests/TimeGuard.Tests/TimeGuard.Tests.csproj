@@ -23,6 +23,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TimeGuard.Core\TimeGuard.Core.csproj" />
+    <Compile Include="..\..\src\TimeGuard.App\Services\JsonFileLogger.cs" Link="App\JsonFileLogger.cs" />
+    <Compile Include="..\..\src\TimeGuard.App\Helpers\StartupHelper.cs" Link="App\StartupHelper.cs" />
   </ItemGroup>
 
 </Project>
