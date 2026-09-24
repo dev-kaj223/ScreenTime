@@ -9,6 +9,29 @@ namespace TimeGuard.UITests;
 public class TestIsolationTests
 {
     [Fact]
+    public async Task HeadlessHelper_IsObservedAndExactInstanceTerminated_OtherSameNameSurvives()
+    {
+        using var fixture = new SeededAppFixture();
+        using var other = new SeededAppFixture();
+        var target = fixture.LaunchHelper(headless: true);
+        var unrelated = other.LaunchHelper(headless: true);
+        var scope = new TestProcessScope(fixture.Runtime.Paths);
+        var monitor = new WindowsProcessMonitor(isAllowedTarget: scope.Contains);
+        var instance = Assert.Single(monitor.Snapshot(["ScreenTime.TestProcess.exe"]));
+        Assert.Equal(target.Id, instance.ProcessId);
+        using (var process = Process.GetProcessById(target.Id)) Assert.Equal("", process.MainWindowTitle);
+        var terminator = new WindowsProcessTerminator(scope.Contains);
+        var mismatch = new TimeGuard.Models.ProcessInstance(instance.AppKey, instance.ProcessId,
+            instance.StartTimeUtcTicks + 1, instance.SessionId);
+        Assert.Equal(TerminationOutcome.IdentityMismatch, (await terminator.TerminateAsync(mismatch, default)).Outcome);
+        Assert.True(IsAlive(target));
+        Assert.Equal(TerminationOutcome.Terminated, (await terminator.TerminateAsync(instance, default)).Outcome);
+        Assert.False(IsAlive(target));
+        Assert.True(IsAlive(unrelated));
+        Assert.Equal(TerminationOutcome.AlreadyExited, (await terminator.TerminateAsync(instance, default)).Outcome);
+    }
+
+    [Fact]
     public void Shutdown_WithModalSettingsPrompt_StopsCleanly()
     {
         using var fixture = new SeededAppFixture();
@@ -64,9 +87,9 @@ public class TestIsolationTests
     [Fact]
     public void MonitorFault_LogsAndExitsNonzero()
     {
-        using var fixture = new SeededAppFixture();
+        using var fixture = new SelectedHelperFixture();
         using var process = Process.GetProcessById(fixture.App.ProcessId);
-        // Fail the next tick in this isolated database, after the monitor has started.
+        // Fail the next configured helper's session write, after the monitor has started.
         using (var connection = new SqliteConnection($"Data Source={fixture.Runtime.Paths.DatabasePath}"))
         {
             connection.Open();
@@ -74,6 +97,7 @@ public class TestIsolationTests
             command.CommandText = "DROP TABLE Sessions";
             command.ExecuteNonQuery();
         }
+        fixture.LaunchHelper();
         Assert.True(process.WaitForExit(15000));
         Assert.NotEqual(0, fixture.App.ExitCode);
         var log = File.ReadAllText(fixture.Runtime.Paths.LogPath);
@@ -96,6 +120,14 @@ public class TestIsolationTests
         Assert.DoesNotContain("MonitorFaulted", log);
     }
 
+    private sealed class SelectedHelperFixture : SeededAppFixture
+    {
+        protected override void SeedDatabase()
+        {
+            base.SeedDatabase();
+            OpenDatabase().SaveRule(new TimeGuard.Models.AppRule { ProcessName = "screentime.testprocess" });
+        }
+    }
     private static bool IsAlive(OwnedProcessIdentity identity)
     {
         try

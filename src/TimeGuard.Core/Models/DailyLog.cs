@@ -28,10 +28,10 @@ public class UsageEntry
     /// <summary>Accumulated usage in minutes (sum of all sessions).</summary>
     public double UsageMinutes { get; set; } = 0;
 
-    /// <summary>True once the process has been killed and blocked for today.</summary>
+    /// <summary>Legacy readable column. Phase 2 policy derives permission from usage and schedule, never this flag.</summary>
     public bool Blocked { get; set; } = false;
 
-    /// <summary>True once the 5-minute warning has been shown (avoid repeated popups).</summary>
+    /// <summary>Legacy five-minute warning request receipt; does not guarantee UI delivery.</summary>
     public bool WarningSent { get; set; } = false;
 }
 

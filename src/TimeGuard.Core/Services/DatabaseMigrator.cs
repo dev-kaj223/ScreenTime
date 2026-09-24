@@ -20,10 +20,30 @@ public class DatabaseMigrator
         using var conn = new SqliteConnection(_connectionString);
         conn.Open();
 
+        using var versionCommand = conn.CreateCommand();
+        versionCommand.CommandText = "PRAGMA user_version";
+        var version = Convert.ToInt32(versionCommand.ExecuteScalar());
+        if (version > 1) throw new InvalidOperationException($"Unsupported database schema version {version}.");
+        if (version == 1) return;
+        // Preserve a consistent pre-upgrade copy of existing ScreenTime profile data.
+        using var tablesCommand = conn.CreateCommand();
+        tablesCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppRules'";
+        if (Convert.ToInt32(tablesCommand.ExecuteScalar()) > 0 && conn.DataSource != ":memory:")
+        {
+            var backupPath = conn.DataSource + ".pre-phase2.bak";
+            if (!File.Exists(backupPath))
+            {
+                using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath }.ToString());
+                backup.Open();
+                conn.BackupDatabase(backup);
+            }
+        }
+
         // Enable WAL mode for better concurrent read performance
         Execute(conn, "PRAGMA journal_mode=WAL;");
+        using var tx = conn.BeginTransaction();
 
-        Execute(conn, """
+        Execute(conn, tx, """
             CREATE TABLE IF NOT EXISTS Settings (
                 Key   TEXT PRIMARY KEY,
                 Value TEXT NOT NULL DEFAULT ''
@@ -76,11 +96,11 @@ public class DatabaseMigrator
             CREATE INDEX IF NOT EXISTS idx_sessions_process ON Sessions(ProcessName, EndTime);
         """);
 
-        // Phase 3 migrations — idempotent
-        AddColumnIfMissing(conn, "Sessions", "WindowTitle", "TEXT");
-        AddColumnIfMissing(conn, "Sessions", "IsPassive",   "INTEGER NOT NULL DEFAULT 0");
+        // Existing history compatibility columns (predate ScreenTime phases).
+        AddColumnIfMissing(conn, tx, "Sessions", "WindowTitle", "TEXT");
+        AddColumnIfMissing(conn, tx, "Sessions", "IsPassive",   "INTEGER NOT NULL DEFAULT 0");
 
-        Execute(conn, """
+        Execute(conn, tx, """
             INSERT INTO AppRuleDaySchedules (RuleId, DayOfWeek, DailyLimitMins, WindowStart, WindowEnd)
             SELECT r.Id, d.DayOfWeek, r.DailyLimitMins, r.WindowStart, r.WindowEnd
             FROM AppRules r
@@ -99,22 +119,36 @@ public class DatabaseMigrator
                 WHERE s.RuleId = r.Id
             );
         """);
+        // A collision aborts the whole migration; never silently merge conflicting rules/usage.
+        foreach (var table in new[] { "AppRules", "DailyUsage", "Sessions" })
+            Execute(conn, tx, $"""
+                UPDATE {table} SET ProcessName = lower(trim(ProcessName));
+                UPDATE {table} SET ProcessName = substr(ProcessName, 1, length(ProcessName) - 4)
+                    WHERE ProcessName LIKE '%.exe';
+                """);
+        Execute(conn, tx, """
+            CREATE UNIQUE INDEX idx_rules_appkey ON AppRules(ProcessName COLLATE NOCASE);
+            CREATE UNIQUE INDEX idx_usage_appkey_date ON DailyUsage(Date, ProcessName COLLATE NOCASE);
+            PRAGMA user_version=1;
+            """);
+        tx.Commit();
     }
+    private static void Execute(SqliteConnection conn, string sql) => Execute(conn, null, sql);
 
-    // Private helper — avoids a dependency on Dapper inside the migrator
-    private static void Execute(SqliteConnection conn, string sql)
+    private static void Execute(SqliteConnection conn, SqliteTransaction? tx, string sql)
     {
         using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
         cmd.CommandText = sql;
         cmd.ExecuteNonQuery();
     }
 
-    private static void AddColumnIfMissing(SqliteConnection conn, string table, string column, string definition)
+    private static void AddColumnIfMissing(SqliteConnection conn, SqliteTransaction tx, string table, string column, string definition)
     {
         using var check = conn.CreateCommand();
+        check.Transaction = tx;
         check.CommandText = $"SELECT COUNT(*) FROM pragma_table_info('{table}') WHERE name = '{column}'";
         var exists = (long)(check.ExecuteScalar() ?? 0L);
-        if (exists == 0)
-            Execute(conn, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
+        if (exists == 0) Execute(conn, tx, $"ALTER TABLE {table} ADD COLUMN {column} {definition}");
     }
 }

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using TimeGuard.Models;
 using TimeGuard.Services;
 using Xunit;
@@ -6,280 +7,120 @@ namespace TimeGuard.Tests;
 
 public class RulesEngineTests
 {
-    private static readonly DayOfWeek[] OrderedDays =
-    [
-        DayOfWeek.Monday,
-        DayOfWeek.Tuesday,
-        DayOfWeek.Wednesday,
-        DayOfWeek.Thursday,
-        DayOfWeek.Friday,
-        DayOfWeek.Saturday,
-        DayOfWeek.Sunday
-    ];
-
-    private static AppConfig MakeConfig(int perAppLimit = 60, int overallLimit = 0,
-        string? windowStart = null, string? windowEnd = null, Action<AppRule>? configureRule = null)
-    {
-        var rule = new AppRule
-        {
-            ProcessName        = "roblox",
-            DisplayName        = "Roblox",
-            DailyLimitMinutes  = perAppLimit,
-            AllowedWindowStart = windowStart,
-            AllowedWindowEnd   = windowEnd,
-            Enabled            = true
-        };
-        configureRule?.Invoke(rule);
-
-        return new AppConfig
-        {
-            PasswordHash             = "x",
-            PasswordSalt             = "x",
-            OverallDailyLimitMinutes = overallLimit,
-            Rules = [rule]
-        };
-    }
-
-    private static DailyLog MakeLog(double usedMinutes = 0, bool blocked = false, DateOnly? date = null) =>
-        new()
-        {
-            Date = date ?? DateOnly.FromDateTime(DateTime.Today),
-            Entries =
-            [
-                new UsageEntry
-                {
-                    ProcessName   = "roblox",
-                    UsageMinutes  = usedMinutes,
-                    Blocked       = blocked
-                }
-            ],
-            TotalUsageMinutes = usedMinutes
-        };
-
-    private static List<AppRuleDaySchedule> MakeWeekSchedule(int defaultLimit = 0,
-        string? defaultStart = null, string? defaultEnd = null)
-    {
-        return OrderedDays
-            .Select(day => new AppRuleDaySchedule
-            {
-                DayOfWeek          = day,
-                DailyLimitMinutes  = defaultLimit,
-                AllowedWindowStart = defaultStart,
-                AllowedWindowEnd   = defaultEnd
-            })
-            .ToList();
-    }
-
+    private static readonly DateOnly Wednesday = new(2026, 9, 23);
     private readonly RulesEngine _engine = new();
-    private readonly string[] _running = ["roblox"];
-
-    // ── Per-app limit ─────────────────────────────────────────────────────────
-
-    [Fact]
-    public void NoAction_WhenUnderLimit()
+    private static AppRule Rule(int limit = 60) => new() { ProcessName = "helper", DisplayName = "Helper", DailyLimitMinutes = limit };
+    private static DailyLog Log(double used = 0, bool blocked = false) => new()
     {
-        var actions = _engine.Evaluate(_running, MakeLog(30), MakeConfig(60), new TimeOnly(16, 0));
-        Assert.Empty(actions);
+        Date = Wednesday, Entries = [new() { ProcessName = "helper", UsageMinutes = used, Blocked = blocked }]
+    };
+    private PolicyDecision Evaluate(double used = 0, bool running = true, bool blocked = false, AppRule? rule = null) =>
+        _engine.Evaluate(PolicySnapshot.Capture(rule ?? Rule(), Log(used, blocked), new(16, 0), running));
+
+    [Fact] public void NoAction_WhenUnderLimit() => Assert.Equal(PolicyState.Available, Evaluate(30).State);
+    [Fact] public void Block_WhenAtLimit() => Assert.True(Evaluate(60).TerminationRequired);
+    [Fact] public void Warn_WhenWithin5MinutesOfLimit()
+    {
+        var decision = Evaluate(56);
+        Assert.True(decision.WarnFiveMinutes);
+        Assert.True(decision.MayContinue);
     }
-
-    [Fact]
-    public void Block_WhenAtLimit()
+    [Fact] public void NoWarn_WhenWarnAlreadySent()
     {
-        var actions = _engine.Evaluate(_running, MakeLog(60), MakeConfig(60), new TimeOnly(16, 0));
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.Block, actions[0].Kind);
+        var log = Log(56); log.Entries[0].WarningSent = true;
+        var decision = _engine.Evaluate(PolicySnapshot.Capture(Rule(), log, new(16, 0), true));
+        Assert.False(decision.WarnFiveMinutes);
+        Assert.Equal(PolicyState.Warning, decision.State);
     }
-
-    [Fact]
-    public void Warn_WhenWithin5MinutesOfLimit()
+    [Fact] public void Block_WhenOutsideTimeWindow()
     {
-        var actions = _engine.Evaluate(_running, MakeLog(56), MakeConfig(60), new TimeOnly(16, 0));
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.WarnFiveMinutes, actions[0].Kind);
+        var rule = Rule(); rule.AllowedWindowStart = "17:00"; rule.AllowedWindowEnd = "20:00";
+        Assert.Equal(PolicyState.TemporaryScheduleRestriction, Evaluate(rule: rule).State);
     }
-
-    [Fact]
-    public void NoWarn_WhenWarnAlreadySent()
+    [Fact] public void NoAction_WhenInsideTimeWindow()
     {
-        var log = MakeLog(56);
-        log.Entries[0].WarningSent = true;
-        var actions = _engine.Evaluate(_running, log, MakeConfig(60), new TimeOnly(16, 0));
-        Assert.Empty(actions);
+        var rule = Rule(); rule.AllowedWindowStart = "15:00"; rule.AllowedWindowEnd = "20:00";
+        Assert.True(Evaluate(rule: rule).MayLaunch);
     }
-
-    // ── Time window ───────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Block_WhenOutsideTimeWindow()
+    [Fact] public void OverallCap_IsInactive()
     {
-        var config = MakeConfig(windowStart: "15:00", windowEnd: "20:00");
-        var actions = _engine.Evaluate(_running, MakeLog(0), config, new TimeOnly(10, 0));
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.Block, actions[0].Kind);
+        var config = new AppConfig { OverallDailyLimitMinutes = 1, Rules = [Rule()] };
+        var log = Log(10); log.TotalUsageMinutes = 1000; log.OverallCapHit = true;
+        Assert.True(_engine.Evaluate(PolicySnapshot.Capture(config.Rules[0], log, new(16, 0), true)).MayContinue);
     }
-
-    [Fact]
-    public void NoAction_WhenInsideTimeWindow()
+    [Fact] public void StoppedApp_HasStatusWithoutTermination()
     {
-        var config = MakeConfig(windowStart: "15:00", windowEnd: "20:00");
-        var actions = _engine.Evaluate(_running, MakeLog(0), config, new TimeOnly(17, 0));
-        Assert.Empty(actions);
+        var decision = Evaluate(60, running: false);
+        Assert.False(decision.MayLaunch);
+        Assert.False(decision.TerminationRequired);
     }
-
-    // ── Overall daily cap ─────────────────────────────────────────────────────
-
-    [Fact]
-    public void Block_WhenOverallCapReached()
+    [Fact] public void Relaunched_OverQuotaIsDenied() => Assert.True(Evaluate(60, blocked: true).TerminationRequired);
+    [Fact] public void Relaunched_NoTerminationIfNotRunning() => Assert.False(Evaluate(60, running: false, blocked: true).TerminationRequired);
+    [Fact] public void LegacyBlockedFlag_CannotDenyRemainingQuota() => Assert.True(Evaluate(10, blocked: true).MayContinue);
+    [Fact] public void BreakIntervalReached_IsInactive()
     {
-        var config  = MakeConfig(overallLimit: 120);
-        var log     = MakeLog(120);
-        log.TotalUsageMinutes = 120;
-        var actions = _engine.Evaluate(_running, log, config, new TimeOnly(16, 0));
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.Block, actions[0].Kind);
+        var rule = Rule(120); rule.BreakEveryMinutes = 30; rule.BreakDurationMinutes = 5;
+        Assert.True(Evaluate(30, rule: rule).MayContinue);
     }
-
-    // ── Not running ───────────────────────────────────────────────────────────
-
-    [Fact]
-    public void NoAction_WhenProcessNotRunning()
+    [Fact] public void BreakIntervalNotReached_IsInactive()
     {
-        var actions = _engine.Evaluate([], MakeLog(60), MakeConfig(60), new TimeOnly(16, 0));
-        Assert.Empty(actions);
+        var rule = Rule(120); rule.BreakEveryMinutes = 30; rule.BreakDurationMinutes = 5;
+        Assert.True(Evaluate(20, rule: rule).MayContinue);
     }
-
-    // ── GetRelaunched ─────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Relaunched_DetectedIfBlockedAndRunning()
+    [Fact] public void Block_WhenWeekdaySpecificLimitReached()
     {
-        var relaunched = _engine.GetRelaunched(_running, MakeLog(60, blocked: true), MakeConfig());
-        Assert.Single(relaunched);
-        Assert.Equal("roblox", relaunched[0].ProcessName);
+        var rule = Rule(0);
+        rule.DaySchedules = [new() { DayOfWeek = DayOfWeek.Wednesday, DailyLimitMinutes = 30 }];
+        Assert.Equal(PolicyState.DailyQuotaBlocked, Evaluate(30, rule: rule).State);
     }
-
-    [Fact]
-    public void Relaunched_EmptyIfNotRunning()
+    [Fact] public void Block_WhenOutsideWeekdaySpecificWindow()
     {
-        var relaunched = _engine.GetRelaunched([], MakeLog(60, blocked: true), MakeConfig());
-        Assert.Empty(relaunched);
+        var rule = Rule();
+        rule.DaySchedules = [new() { DayOfWeek = DayOfWeek.Wednesday, AllowedWindowStart = "12:00", AllowedWindowEnd = "14:00" }];
+        Assert.Equal(PolicyState.TemporaryScheduleRestriction, Evaluate(rule: rule).State);
     }
-
-    // ── Already-blocked entry skipped ─────────────────────────────────────────
-
-    [Fact]
-    public void NoBlock_WhenEntryAlreadyBlocked()
+    [Fact] public void NoAction_WhenAnotherDayHasShorterLimit()
     {
-        // If the entry is already blocked, Evaluate should not emit a second Block action
-        var actions = _engine.Evaluate(_running, MakeLog(60, blocked: true), MakeConfig(60), new TimeOnly(16, 0));
-        Assert.Empty(actions);
+        var rule = Rule(60);
+        rule.DaySchedules = [new() { DayOfWeek = DayOfWeek.Monday, DailyLimitMinutes = 30 }];
+        Assert.True(Evaluate(45, rule: rule).MayContinue);
     }
-
-    // ── Break schedule ────────────────────────────────────────────────────────
-
-    [Fact]
-    public void BreakDue_WhenTimeSinceBreakExceedsInterval()
+    [Fact] public void EvaluationAndCapture_DoNotMutateAnyInput_OrCreateMissingUsage()
     {
-        var config = new AppConfig
-        {
-            PasswordHash = "x", PasswordSalt = "x",
-            Rules =
-            [
-                new AppRule
-                {
-                    ProcessName          = "roblox",
-                    DisplayName          = "Roblox",
-                    DailyLimitMinutes    = 120,
-                    BreakEveryMinutes    = 30,
-                    BreakDurationMinutes = 5,
-                    Enabled              = true
-                }
-            ]
-        };
-
-        var breakTimers = new Dictionary<string, double> { ["roblox"] = 30 };
-        var actions = _engine.Evaluate(_running, MakeLog(30), config, new TimeOnly(16, 0), breakTimers);
-
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.BreakDue, actions[0].Kind);
+        var config = new AppConfig { Rules = [Rule()] };
+        var log = new DailyLog { Date = Wednesday };
+        var before = JsonSerializer.Serialize(new { config, log });
+        var snapshot = PolicySnapshot.Capture(config.Rules[0], log, new(16, 0), true);
+        var decision = _engine.Evaluate(snapshot);
+        Assert.Equal(decision, _engine.Evaluate(snapshot));
+        Assert.Equal(before, JsonSerializer.Serialize(new { config, log }));
+        config.Rules[0].DailyLimitMinutes = 1;
+        log.GetOrCreate("helper").UsageMinutes = 100;
+        Assert.Equal(decision, _engine.Evaluate(snapshot)); // Snapshot owns scalar copies.
     }
-
-    [Fact]
-    public void NoBreakDue_WhenTimeSinceBreakBelowInterval()
+    [Fact] public void DisabledRule_ImposesNoRestrictionOrWarning()
     {
-        var config = new AppConfig
-        {
-            PasswordHash = "x", PasswordSalt = "x",
-            Rules =
-            [
-                new AppRule
-                {
-                    ProcessName          = "roblox",
-                    DisplayName          = "Roblox",
-                    DailyLimitMinutes    = 120,
-                    BreakEveryMinutes    = 30,
-                    BreakDurationMinutes = 5,
-                    Enabled              = true
-                }
-            ]
-        };
-
-        var breakTimers = new Dictionary<string, double> { ["roblox"] = 20 };
-        var actions = _engine.Evaluate(_running, MakeLog(20), config, new TimeOnly(16, 0), breakTimers);
-        Assert.Empty(actions);
+        var rule = Rule(1); rule.Enabled = false;
+        var decision = Evaluate(100, rule: rule);
+        Assert.True(decision.MayLaunch); Assert.True(decision.MayContinue);
+        Assert.False(decision.WarnFiveMinutes); Assert.False(decision.TerminationRequired);
     }
-
-    [Fact]
-    public void Block_WhenWeekdaySpecificLimitReached()
+    [Theory]
+    [InlineData(15, 0)] [InlineData(20, 0)]
+    public void LegacyWindowEndpoints_RemainInclusive(int hour, int minute)
     {
-        var wednesday = new DateOnly(2026, 3, 4);
-        var config = MakeConfig(configureRule: rule =>
-        {
-            var schedule = MakeWeekSchedule(defaultLimit: 60);
-            schedule.First(s => s.DayOfWeek == DayOfWeek.Wednesday).DailyLimitMinutes = 30;
-            rule.SetWeekSchedule(schedule);
-        });
-
-        var actions = _engine.Evaluate(_running, MakeLog(30, date: wednesday), config, new TimeOnly(13, 0));
-
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.Block, actions[0].Kind);
-        Assert.Contains("30 min", actions[0].Reason);
+        var rule = Rule(); rule.AllowedWindowStart = "15:00"; rule.AllowedWindowEnd = "20:00";
+        Assert.True(_engine.Evaluate(PolicySnapshot.Capture(rule, Log(), new(hour, minute), true)).MayContinue);
     }
-
-    [Fact]
-    public void Block_WhenOutsideWeekdaySpecificWindow()
+    [Fact] public void UnlimitedDay_RemainsUnlimited() => Assert.True(Evaluate(1000, rule: Rule(0)).MayContinue);
+    [Fact] public void ScheduleAndQuotaReasons_AreBothRetained()
     {
-        var wednesday = new DateOnly(2026, 3, 4);
-        var config = MakeConfig(configureRule: rule =>
-        {
-            var schedule = MakeWeekSchedule(defaultLimit: 0);
-            var wednesdaySchedule = schedule.First(s => s.DayOfWeek == DayOfWeek.Wednesday);
-            wednesdaySchedule.AllowedWindowStart = "12:00";
-            wednesdaySchedule.AllowedWindowEnd   = "14:00";
-            rule.SetWeekSchedule(schedule);
-        });
-
-        var actions = _engine.Evaluate(_running, MakeLog(0, date: wednesday), config, new TimeOnly(15, 0));
-
-        Assert.Single(actions);
-        Assert.Equal(RulesEngine.ActionKind.Block, actions[0].Kind);
-        Assert.Contains("12:00-14:00", actions[0].Reason);
-    }
-
-    [Fact]
-    public void NoAction_WhenAnotherDayHasShorterLimit()
-    {
-        var monday = new DateOnly(2026, 3, 2);
-        var config = MakeConfig(configureRule: rule =>
-        {
-            var schedule = MakeWeekSchedule(defaultLimit: 60);
-            schedule.First(s => s.DayOfWeek == DayOfWeek.Wednesday).DailyLimitMinutes = 30;
-            rule.SetWeekSchedule(schedule);
-        });
-
-        var actions = _engine.Evaluate(_running, MakeLog(45, date: monday), config, new TimeOnly(13, 0));
-
-        Assert.Empty(actions);
+        var rule = Rule(); rule.AllowedWindowStart = "17:00"; rule.AllowedWindowEnd = "20:00";
+        var outside = PolicySnapshot.Capture(rule, Log(60), new(16, 0), true);
+        var decision = _engine.Evaluate(outside);
+        Assert.Equal(PolicyReason.OutsideAllowedWindow | PolicyReason.DailyQuotaExhausted, decision.Reasons);
+        var inside = _engine.Evaluate(outside with { LocalTime = new(18, 0) });
+        Assert.Equal(PolicyState.DailyQuotaBlocked, inside.State);
+        Assert.False(inside.MayLaunch);
     }
 }

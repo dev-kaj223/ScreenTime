@@ -105,7 +105,7 @@ public class DatabaseServiceTests : IDisposable
         svc.SaveRule(rule);
 
         var saved = svc.GetRules()[0];
-        saved.DailyLimitMinutes = 120;
+        saved.SetWeekSchedule(MakeWeekSchedule(defaultLimit: 120));
         svc.SaveRule(saved);
 
         Assert.Equal(120, svc.GetRules()[0].DailyLimitMinutes);

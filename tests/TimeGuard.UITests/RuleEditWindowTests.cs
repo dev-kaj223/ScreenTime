@@ -1,4 +1,4 @@
-using FlaUI.Core.Input;
+using FlaUI.Core.AutomationElements;
 using TimeGuard.UITests.Helpers;
 using Xunit;
 
@@ -26,11 +26,10 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
             cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit));
         if (passwordBoxes.Length > 0)
         {
-            passwordBoxes[0].Click();
-            Keyboard.Type(AppFixture.TestPassword);
+            passwordBoxes[0].AsTextBox().Text = AppFixture.TestPassword;
         }
 
-        prompt.FindButton("Unlock").Click();
+        prompt.FindButton("Unlock").Invoke();
         return _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings");
     }
 
@@ -44,11 +43,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
     private static void FillField(FlaUI.Core.AutomationElements.Window window,
         string automationId, string value)
     {
-        var box = window.FindTextBox(automationId);
-        box.Click();
-        Keyboard.TypeSimultaneously(FlaUI.Core.WindowsAPI.VirtualKeyShort.CONTROL,
-            FlaUI.Core.WindowsAPI.VirtualKeyShort.KEY_A);
-        Keyboard.Type(value);
+        window.FindTextBox(automationId).AsTextBox().Text = value;
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -120,7 +115,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         var ruleWindow = OpenRuleEditWindow(settings);
 
         FillField(ruleWindow, "DisplayNameBox",   "TestApp");
-        FillField(ruleWindow, "ProcessNameBox",   "testapp");
+        FillField(ruleWindow, "ProcessNameBox",   "testapp-nolimit");
         FillField(ruleWindow, "MondayLimitBox",   "0");    // no limit
         FillField(ruleWindow, "BreakEveryBox",    "60");
         FillField(ruleWindow, "BreakDurationBox", "10");
@@ -175,7 +170,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         var ruleWindow = OpenRuleEditWindow(settings);
 
         FillField(ruleWindow, "DisplayNameBox",   "TestApp");
-        FillField(ruleWindow, "ProcessNameBox",   "testapp");
+        FillField(ruleWindow, "ProcessNameBox",   "testapp-equalbreak");
         FillField(ruleWindow, "MondayLimitBox",   "120");
         FillField(ruleWindow, "BreakEveryBox",    "30");
         FillField(ruleWindow, "BreakDurationBox", "30");  // equals breakEvery — valid
@@ -220,6 +215,28 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.Equal("12:00", saved.GetScheduleForDay(DayOfWeek.Wednesday).AllowedWindowStart);
         Assert.Equal("14:00", saved.GetScheduleForDay(DayOfWeek.Wednesday).AllowedWindowEnd);
 
+        settings.Close();
+    }
+
+    [Fact]
+    public void Save_DuplicateCanonicalProcess_ShowsErrorWithoutCrashingOrChangingRule()
+    {
+        var db = _fx.OpenDatabase();
+        db.SaveRule(new() { ProcessName = "duplicatehelper", DisplayName = "Original", DailyLimitMinutes = 30 });
+        var settings = OpenSettingsWindow();
+        var editor = OpenRuleEditWindow(settings);
+        FillField(editor, "DisplayNameBox", "Replacement");
+        FillField(editor, "ProcessNameBox", "DuplicateHelper.exe");
+        editor.FindButton("Save").Invoke();
+        Window? error = null;
+        Assert.True(SpinWait.SpinUntil(() =>
+        {
+            error = settings.ModalWindows.FirstOrDefault(w => w.Title == "Duplicate application");
+            return error is not null;
+        }, TimeSpan.FromSeconds(10)), "Expected the duplicate-rule dialog owned by Settings.");
+        Assert.NotNull(error!.FindTextContaining("already has a rule"));
+        error!.FindButton("OK").Invoke();
+        Assert.Equal("Original", db.GetRules().Single(r => r.ProcessName == "duplicatehelper").DisplayName);
         settings.Close();
     }
 }

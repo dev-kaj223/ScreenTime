@@ -35,6 +35,18 @@ public class PopupTests : IDisposable
             "BlockedPopup should close after clicking OK.");
     }
 
+    [Fact]
+    public void ClosingPopup_DoesNotPermitAnOverQuotaRelaunch()
+    {
+        _fx.EnsureHelperRunning();
+        ClosePopupsThroughOk(_fx.WaitForInitialBlockPopups());
+        Assert.True(_fx.HelperExited());
+        _fx.EnsureHelperRunning();
+        var popups = _fx.WaitForInitialBlockPopups();
+        Assert.True(_fx.HelperExited());
+        ClosePopupsThroughOk(popups);
+    }
+
     private void ClosePopupsThroughOk(Window[] popups)
     {
         foreach (var popup in popups)
@@ -83,15 +95,13 @@ public class PopupTestFixture : AppFixture
     public Window[] WaitForInitialBlockPopups()
     {
         Window[] popups = [];
-        // Characterize the unchanged legacy behavior: initial Block + GetRelaunched
-        // emit two notifications from the same snapshot. Do not mistake one for a stale
-        // popup, or pass the closure assertion before the second has appeared.
+        // One decision produces one popup; the old duplicate relaunch pass is gone.
         Assert.True(SpinWait.SpinUntil(() =>
         {
             popups = App.GetAllTopLevelWindows(Automation).Where(w => w.Title == "Time's Up").ToArray();
-            return popups.Length == 2 && popups.All(w =>
+            return popups.Length == 1 && popups.All(w =>
                 w.FindFirstDescendant(cf => cf.ByName("OK")) is { IsEnabled: true, IsOffscreen: false });
-        }, TimeSpan.FromSeconds(20)), "Expected both initial-block popups and their enabled OK buttons.");
+        }, TimeSpan.FromSeconds(20)), "Expected one initial-block popup and their enabled OK buttons.");
         return popups;
     }
 

@@ -4,175 +4,58 @@ using Xunit;
 
 namespace TimeGuard.Tests;
 
-/// <summary>
-/// Tests for MonitorService.ReloadConfig unblock behavior (Bug 1).
-/// </summary>
-public class MonitorServiceTests : IDisposable
+public class MonitorServiceTests
 {
-    private readonly TempProfile _profile = new();
-    private readonly string _dbPath;
-    private readonly string _connString;
-
-    public MonitorServiceTests()
+    [Theory]
+    [InlineData(90, true)] [InlineData(60, false)] [InlineData(0, true)]
+    public async Task ReloadConfig_RecomputesPermission_FromTodaysSchedule(int newLimit, bool permitted)
     {
-        _dbPath     = _profile.Runtime.Paths.DatabasePath;
-        _connString = $"Data Source={_dbPath};";
-    }
-
-    private DatabaseService CreateDb() => new(_connString);
-
-    private static AppConfig MakeConfig(DatabaseService db, int perAppLimit = 60, int overallLimit = 0)
-    {
-        var rule = new AppRule
-        {
-            ProcessName       = "roblox",
-            DisplayName       = "Roblox",
-            DailyLimitMinutes = perAppLimit,
-            Enabled           = true
-        };
-        db.SaveRule(rule);
-        var config = db.LoadConfig();
-        config.OverallDailyLimitMinutes = overallLimit;
-        db.SaveConfig(config);
-        return db.LoadConfig();
-    }
-
-    // ── ReloadConfig unblocks per-app blocked entry ───────────────────────────
-
-    [Fact]
-    public void ReloadConfig_UnblocksEntry_WhenPerAppLimitRaised()
-    {
-        var db     = CreateDb();
-        var config = MakeConfig(db, perAppLimit: 60);
-        var today  = DateOnly.FromDateTime(DateTime.Today);
-
-        // Seed a blocked entry at exactly the original limit
-        db.UpsertUsageEntry(today, new UsageEntry
-        {
-            ProcessName  = "roblox",
-            UsageMinutes = 60,
-            Blocked      = true
-        });
-
-        var monitor = new MonitorService(db, new RulesEngine(), config);
-
-        // Raise the per-app limit above current usage
-        var updatedRule = db.GetRules()[0];
-        updatedRule.DailyLimitMinutes = 90;
-        db.SaveRule(updatedRule);
-        var updatedConfig = db.LoadConfig();
-
-        monitor.ReloadConfig(updatedConfig);
-
-        var log = db.LoadLog(today);
-        Assert.False(log.Entries[0].Blocked, "Entry should be unblocked after limit is raised.");
+        using var profile = new TempProfile();
+        var db = new DatabaseService(profile.Runtime.Paths);
+        var clock = new TestClock();
+        db.UpsertUsageEntry(new(2026, 9, 23), new() { ProcessName = "helper", UsageMinutes = 60, Blocked = true });
+        var rule = new AppRule { ProcessName = "helper", DailyLimitMinutes = 0,
+            DaySchedules = [new() { DayOfWeek = DayOfWeek.Wednesday, DailyLimitMinutes = 60 }] };
+        await using var monitor = new MonitorService(db, new(), new() { Rules = [rule] }, processes: new FakeProcesses(() => []), time: clock);
+        await monitor.TickAsync();
+        Assert.False(Assert.Single(monitor.Decisions).MayLaunch);
+        rule.DaySchedules[0].DailyLimitMinutes = newLimit;
+        rule.DailyLimitMinutes = 999; // Deliberately stale legacy field must not control reload.
+        monitor.ReloadConfig(new() { Rules = [rule] });
+        rule.DaySchedules[0].DailyLimitMinutes = 1; // Caller cannot mutate the queued private copy.
+        await monitor.TickAsync();
+        Assert.Equal(permitted, Assert.Single(monitor.Decisions).MayLaunch);
+        Assert.True(Assert.Single(db.LoadLog(new(2026, 9, 23)).Entries).Blocked); // No flag toggles required.
     }
 
     [Fact]
-    public void ReloadConfig_KeepsBlocked_WhenUsageStillExceedsNewLimit()
+    public async Task ReloadConfig_ResetWarningSent_WhenLimitRaisedWellAboveUsage()
     {
-        var db     = CreateDb();
-        var config = MakeConfig(db, perAppLimit: 60);
-        var today  = DateOnly.FromDateTime(DateTime.Today);
-
-        db.UpsertUsageEntry(today, new UsageEntry
-        {
-            ProcessName  = "roblox",
-            UsageMinutes = 60,
-            Blocked      = true
-        });
-
-        var monitor = new MonitorService(db, new RulesEngine(), config);
-
-        // Raise to 60 — still at the limit, should stay blocked
-        var updatedRule = db.GetRules()[0];
-        updatedRule.DailyLimitMinutes = 60;
-        db.SaveRule(updatedRule);
-
-        monitor.ReloadConfig(db.LoadConfig());
-
-        var log = db.LoadLog(today);
-        Assert.True(log.Entries[0].Blocked, "Entry should remain blocked when usage still meets the limit.");
+        using var profile = new TempProfile();
+        var db = new DatabaseService(profile.Runtime.Paths);
+        db.UpsertUsageEntry(new(2026, 9, 23), new() { ProcessName = "helper", UsageMinutes = 56, WarningSent = true });
+        var rule = new AppRule { ProcessName = "helper", DailyLimitMinutes = 60 };
+        await using var monitor = new MonitorService(db, new(), new() { Rules = [rule] }, processes: new FakeProcesses(() => []), time: new TestClock());
+        rule.DailyLimitMinutes = 120;
+        monitor.ReloadConfig(new() { Rules = [rule] });
+        await monitor.TickAsync();
+        Assert.False(Assert.Single(db.LoadLog(new(2026, 9, 23)).Entries).WarningSent);
     }
 
-    [Fact]
-    public void ReloadConfig_ResetWarningSent_WhenLimitRaisedWellAboveUsage()
+    [Theory]
+    [InlineData(180)] [InlineData(0)]
+    public async Task ReloadConfig_OverallCapRemainsInactive_WhenRaisedOrRemoved(int newCap)
     {
-        var db     = CreateDb();
-        var config = MakeConfig(db, perAppLimit: 60);
-        var today  = DateOnly.FromDateTime(DateTime.Today);
-
-        // 56 min used — close to original 60 limit, warning already sent
-        db.UpsertUsageEntry(today, new UsageEntry
-        {
-            ProcessName  = "roblox",
-            UsageMinutes = 56,
-            Blocked      = true,
-            WarningSent  = true
-        });
-
-        var monitor = new MonitorService(db, new RulesEngine(), config);
-
-        var updatedRule = db.GetRules()[0];
-        updatedRule.DailyLimitMinutes = 120; // raised well above usage
-        db.SaveRule(updatedRule);
-
-        monitor.ReloadConfig(db.LoadConfig());
-
-        var log = db.LoadLog(today);
-        Assert.False(log.Entries[0].WarningSent, "WarningSent should be reset when limit is raised well above usage.");
-    }
-
-    // ── ReloadConfig unsets overall cap ───────────────────────────────────────
-
-    [Fact]
-    public void ReloadConfig_UnsetsOverallCap_WhenCapRaised()
-    {
-        var db     = CreateDb();
-        var config = MakeConfig(db, perAppLimit: 200, overallLimit: 120);
-        var today  = DateOnly.FromDateTime(DateTime.Today);
-
-        db.UpsertUsageEntry(today, new UsageEntry
-        {
-            ProcessName  = "roblox",
-            UsageMinutes = 120
-        });
-
-        // LoadTodayLog will set OverallCapHit = true (120 >= 120)
-        var monitor = new MonitorService(db, new RulesEngine(), config);
-        Assert.True(monitor.IsOverallCapHit);
-
-        // Raise overall cap above current usage
-        config.OverallDailyLimitMinutes = 180;
-        db.SaveConfig(config);
-
-        monitor.ReloadConfig(db.LoadConfig());
-
-        Assert.False(monitor.IsOverallCapHit, "Overall cap hit flag should be cleared when cap is raised above current usage.");
-    }
-
-    [Fact]
-    public void ReloadConfig_UnsetsOverallCap_WhenCapRemovedEntirely()
-    {
-        var db     = CreateDb();
-        var config = MakeConfig(db, perAppLimit: 200, overallLimit: 120);
-        var today  = DateOnly.FromDateTime(DateTime.Today);
-
-        db.UpsertUsageEntry(today, new UsageEntry { ProcessName = "roblox", UsageMinutes = 120 });
-
-        var monitor = new MonitorService(db, new RulesEngine(), config);
-        Assert.True(monitor.IsOverallCapHit);
-
-        config.OverallDailyLimitMinutes = 0; // remove overall cap
-        db.SaveConfig(config);
-
-        monitor.ReloadConfig(db.LoadConfig());
-
-        Assert.False(monitor.IsOverallCapHit, "Overall cap hit flag should be cleared when overall cap is removed.");
-    }
-
-    public void Dispose()
-    {
-        _profile.Dispose();
+        using var profile = new TempProfile();
+        var db = new DatabaseService(profile.Runtime.Paths);
+        db.UpsertUsageEntry(new(2026, 9, 23), new() { ProcessName = "helper", UsageMinutes = 120 });
+        var config = new AppConfig { OverallDailyLimitMinutes = 120, Rules = [new() { ProcessName = "helper", DailyLimitMinutes = 200 }] };
+        await using var monitor = new MonitorService(db, new(), config, processes: new FakeProcesses(() => []), time: new TestClock());
+        await monitor.TickAsync();
+        Assert.True(Assert.Single(monitor.Decisions).MayLaunch);
+        config.OverallDailyLimitMinutes = newCap;
+        monitor.ReloadConfig(config);
+        await monitor.TickAsync();
+        Assert.True(Assert.Single(monitor.Decisions).MayLaunch);
     }
 }

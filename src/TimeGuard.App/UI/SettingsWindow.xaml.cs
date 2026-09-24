@@ -98,7 +98,7 @@ public partial class SettingsWindow : Window
         var dialog = new RuleEditWindow(rule) { Owner = this };
         if (dialog.ShowDialog() == true && dialog.Result is not null)
         {
-            _db.SaveRule(dialog.Result);
+            SaveRuleWithFeedback(dialog.Result);
             LoadRules();
         }
     }
@@ -108,7 +108,7 @@ public partial class SettingsWindow : Window
         var dialog = new RuleEditWindow(new AppRule());
         if (dialog.ShowDialog() == true && dialog.Result is not null)
         {
-            _db.SaveRule(dialog.Result);
+            SaveRuleWithFeedback(dialog.Result);
             LoadRules();
         }
     }
@@ -120,7 +120,7 @@ public partial class SettingsWindow : Window
         if (dialog.ShowDialog() == true && dialog.Result is not null)
         {
             dialog.Result.Id = selected.Id;
-            _db.SaveRule(dialog.Result);
+            SaveRuleWithFeedback(dialog.Result);
             LoadRules();
         }
     }
@@ -156,7 +156,7 @@ public partial class SettingsWindow : Window
             var dialog = new RuleEditWindow(rule);
             if (dialog.ShowDialog() == true && dialog.Result is not null)
             {
-                _db.SaveRule(dialog.Result);
+                SaveRuleWithFeedback(dialog.Result);
                 LoadRules();
             }
         }
@@ -165,6 +165,20 @@ public partial class SettingsWindow : Window
     private void OnViewDashboard(object sender, RoutedEventArgs e)
     {
         new DashboardWindow(_db).ShowDialog();
+    }
+
+    private void SaveRuleWithFeedback(AppRule rule)
+    {
+        try { _db.SaveRule(rule); }
+        catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteExtendedErrorCode == 2067)
+        {
+            WpfMessageBox.Show(this, "An application with this process name already has a rule. Edit the existing rule.",
+                "Duplicate application", MessageBoxButton.OK);
+        }
+        catch (ArgumentException ex)
+        {
+            WpfMessageBox.Show(this, ex.Message, "Invalid application", MessageBoxButton.OK);
+        }
     }
 
     // ── Usage Tab ─────────────────────────────────────────────────────────────

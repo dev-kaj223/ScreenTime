@@ -9,7 +9,7 @@ namespace TimeGuard.Services;
 /// Replaces the flat-file StorageService.
 /// Thread-safe — uses a single connection string; SQLite WAL handles concurrency.
 /// </summary>
-public class DatabaseService
+public class DatabaseService : IStateStore
 {
     private readonly string _connectionString;
 
@@ -120,6 +120,8 @@ public class DatabaseService
 
     public void SaveRule(AppRule rule)
     {
+        if (string.IsNullOrWhiteSpace(ProcessInstance.NormalizeKey(rule.ProcessName)))
+            throw new ArgumentException("A process name is required.", nameof(rule));
         using var conn = Open();
         using var tx   = conn.BeginTransaction();
 
@@ -136,7 +138,7 @@ public class DatabaseService
                 SELECT last_insert_rowid();
                 """, new
             {
-                rule.ProcessName,
+                ProcessName = ProcessInstance.NormalizeKey(rule.ProcessName),
                 rule.DisplayName,
                 DailyLimitMinutes  = legacySchedule.DailyLimitMinutes,
                 AllowedWindowStart = legacySchedule.AllowedWindowStart,
@@ -162,7 +164,7 @@ public class DatabaseService
                 """, new
             {
                 rule.Id,
-                rule.ProcessName,
+                ProcessName = ProcessInstance.NormalizeKey(rule.ProcessName),
                 rule.DisplayName,
                 DailyLimitMinutes  = legacySchedule.DailyLimitMinutes,
                 AllowedWindowStart = legacySchedule.AllowedWindowStart,
@@ -244,7 +246,7 @@ public class DatabaseService
             """, new
         {
             date = date.ToString("yyyy-MM-dd"),
-            entry.ProcessName,
+            ProcessName = ProcessInstance.NormalizeKey(entry.ProcessName),
             entry.UsageMinutes,
             entry.Blocked,
             entry.WarningSent
@@ -376,22 +378,7 @@ public class DatabaseService
         if (rule.DaySchedules.Count == 0)
             return BuildUniformSchedules(rule);
 
-        if (ShouldOverwriteSchedulesFromLegacyFields(rule))
-            return BuildUniformSchedules(rule);
-
         return rule.GetWeekSchedule();
-    }
-
-    private static bool ShouldOverwriteSchedulesFromLegacyFields(AppRule rule)
-    {
-        var hasLegacyWindow = rule.AllowedWindowStart is not null || rule.AllowedWindowEnd is not null;
-
-        if (!rule.TryGetUniformSchedule(out var uniform))
-            return rule.DailyLimitMinutes > 0 || hasLegacyWindow;
-
-        return rule.DailyLimitMinutes != uniform.DailyLimitMinutes ||
-               !string.Equals(rule.AllowedWindowStart, uniform.AllowedWindowStart, StringComparison.Ordinal) ||
-               !string.Equals(rule.AllowedWindowEnd, uniform.AllowedWindowEnd, StringComparison.Ordinal);
     }
 
     private static List<AppRuleDaySchedule> BuildUniformSchedules(AppRule rule)

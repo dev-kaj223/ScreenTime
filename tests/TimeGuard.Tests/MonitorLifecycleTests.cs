@@ -8,6 +8,12 @@ namespace TimeGuard.Tests;
 
 public class MonitorLifecycleTests
 {
+    private static MonitorService CreateMonitor(DatabaseService db, RulesEngine rules, AppConfig config,
+        IAppLogger? logger = null, Func<Dictionary<string, string>>? snapshot = null) =>
+        new(db, rules, config, logger,
+            new FakeProcesses(() => (snapshot?.Invoke() ?? []).Keys.Select((name, index) =>
+                new ProcessInstance(name, index + 1, 12345, 1)).ToArray()), new FakeTerminator());
+
     private sealed class RecordingLogger : IAppLogger
     {
         public ConcurrentQueue<(string Level, string Event, Exception? Error)> Entries { get; } = new();
@@ -35,8 +41,9 @@ public class MonitorLifecycleTests
         {
             Rules = [new AppRule { ProcessName = "helper", DailyLimitMinutes = 5 }]
         };
-        var monitor = new MonitorService(db, new RulesEngine(), config, logger,
-            () => new() { ["helper"] = "owned test helper" });
+        var warningHandled = false;
+        var monitor = CreateMonitor(db, new RulesEngine(), config, logger,
+            () => warningHandled && failWorker ? throw workerFailure : new() { ["helper"] = "owned test helper" });
         monitor.WarnRequested += (_, _) =>
         {
             // The first warning occurs after the real session has been opened.
@@ -52,13 +59,13 @@ public class MonitorLifecycleTests
                     """;
                 command.ExecuteNonQuery();
             }
-            if (failWorker) throw workerFailure;
-            monitor.Dispose(); // Request normal cancellation after a completed observation.
+            warningHandled = true;
+            if (!failWorker) monitor.Dispose(); // Failure is injected at the next process observation, not through UI.
         };
         monitor.Start();
         try
         {
-            var error = await Record.ExceptionAsync(() => monitor.Completion.WaitAsync(TimeSpan.FromSeconds(5)));
+            var error = await Record.ExceptionAsync(() => monitor.Completion.WaitAsync(TimeSpan.FromSeconds(12)));
             if (failWorker || failCleanup)
             {
                 Assert.True(monitor.Completion.IsFaulted);
@@ -108,7 +115,7 @@ public class MonitorLifecycleTests
         var logger = new RecordingLogger();
         var sampled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var calls = 0;
-        var monitor = new MonitorService(new DatabaseService(profile.Runtime.Paths), new RulesEngine(), new AppConfig(), logger,
+        var monitor = CreateMonitor(new DatabaseService(profile.Runtime.Paths), new RulesEngine(), new AppConfig(), logger,
             () => { Interlocked.Increment(ref calls); sampled.TrySetResult(); return []; });
         await using (monitor)
         {
@@ -134,7 +141,7 @@ public class MonitorLifecycleTests
         using var profile = new TempProfile();
         var logger = new RecordingLogger();
         var failure = new InvalidOperationException("snapshot failure");
-        var monitor = new MonitorService(new DatabaseService(profile.Runtime.Paths), new RulesEngine(), new AppConfig(), logger,
+        var monitor = CreateMonitor(new DatabaseService(profile.Runtime.Paths), new RulesEngine(), new AppConfig(), logger,
             () => throw failure);
         monitor.Start();
         var worker = monitor.Completion;
@@ -152,13 +159,13 @@ public class MonitorLifecycleTests
         using var profile = new TempProfile();
         var db = new DatabaseService(profile.Runtime.Paths);
         var sampled = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
-        await using var monitor = new MonitorService(db, new RulesEngine(), new AppConfig(), new ThrowingLogger(),
+        await using var monitor = CreateMonitor(db, new RulesEngine(), new AppConfig(), new ThrowingLogger(),
             () => { sampled.TrySetResult(); return []; });
         monitor.Start();
         await sampled.Task.WaitAsync(TimeSpan.FromSeconds(5));
         await monitor.StopAsync();
         Assert.True(monitor.Completion.IsCompletedSuccessfully);
-        var failing = new MonitorService(db, new RulesEngine(), new AppConfig(), new ThrowingLogger(),
+        var failing = CreateMonitor(db, new RulesEngine(), new AppConfig(), new ThrowingLogger(),
             () => throw new InvalidOperationException("original failure"));
         failing.Start();
         var exception = await Assert.ThrowsAsync<InvalidOperationException>(() => failing.Completion);
@@ -173,7 +180,7 @@ public class MonitorLifecycleTests
         using var release = new ManualResetEventSlim();
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var db = new DatabaseService(profile.Runtime.Paths);
-        await using var monitor = new MonitorService(db, new RulesEngine(), new AppConfig(), null, () =>
+        await using var monitor = CreateMonitor(db, new RulesEngine(), new AppConfig { Rules = [new() { ProcessName = "test-process" }] }, null, () =>
         {
             entered.TrySetResult();
             if (!release.Wait(TimeSpan.FromSeconds(5))) throw new TimeoutException();
@@ -197,7 +204,7 @@ public class MonitorLifecycleTests
         var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var config = new AppConfig { Rules = [new AppRule { ProcessName = "helper", DailyLimitMinutes = 1 }] };
         db.UpsertUsageEntry(DateOnly.FromDateTime(DateTime.Today), new UsageEntry { ProcessName = "helper", UsageMinutes = 2 });
-        await using var monitor = new MonitorService(db, new RulesEngine(), config, null,
+        await using var monitor = CreateMonitor(db, new RulesEngine(), config, null,
             () => new() { ["helper"] = "owned test helper" });
         monitor.BlockRequested += (_, _) =>
         {
@@ -215,7 +222,7 @@ public class MonitorLifecycleTests
     public async Task StopBeforeStart_IsSafeAndPreventsLaterStart()
     {
         using var profile = new TempProfile();
-        await using var monitor = new MonitorService(new DatabaseService(profile.Runtime.Paths), new RulesEngine(), new AppConfig());
+        await using var monitor = CreateMonitor(new DatabaseService(profile.Runtime.Paths), new RulesEngine(), new AppConfig());
         await monitor.StopAsync();
         Assert.Throws<ObjectDisposedException>(monitor.Start);
     }

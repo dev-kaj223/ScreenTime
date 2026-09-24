@@ -1,6 +1,3 @@
-using System.Diagnostics;
-using System.IO;
-using System.Text.Json;
 using System.Windows;
 using System.Windows.Threading;
 using TimeGuard.Helpers;
@@ -52,10 +49,13 @@ public partial class App : WpfApplication
             }
 
             if (!StartupHelper.IsRegistered(_runtime)) StartupHelper.Register(_runtime);
-            _monitor = new MonitorService(_db, new RulesEngine(), config, _logger);
+            Func<TimeGuard.Models.ProcessInstance, bool>? targetScope = _runtime.Profile == RuntimeProfile.Test
+                ? new TestProcessScope(_runtime.Paths, _logger).Contains : null;
+            _monitor = new MonitorService(_db, new RulesEngine(), config, _logger,
+                new WindowsProcessMonitor(_logger, targetScope), new WindowsProcessTerminator(targetScope));
             _monitor.BlockRequested += OnBlockRequested;
             _monitor.WarnRequested += OnWarnRequested;
-            _monitor.BreakRequested += OnBreakRequested;
+
             _monitor.Start();
             ObserveMonitorAsync();
 
@@ -110,8 +110,7 @@ public partial class App : WpfApplication
         if (_stopping) return;
         _stopping = true;
         _testCommands?.Stop();
-        _monitor?.Dispose(); // Cancel dispatch waits before closing modal windows.
-        foreach (var window in Windows.OfType<UI.BreakOverlay>().ToArray()) window.Close();
+        _monitor?.Dispose();
         if (_monitor is not null)
         {
             try { await _monitor.StopAsync(); }
@@ -122,55 +121,20 @@ public partial class App : WpfApplication
 
     private void DispatchMonitorEvent(Action action)
     {
-        var token = _monitor!.StoppingToken;
-        token.ThrowIfCancellationRequested();
-        // Preserve synchronous event semantics during normal operation, but allow cancellation
-        // even when a modal overlay is still running its dispatcher callback.
-        Dispatcher.InvokeAsync(() => { if (!_stopping) action(); }, DispatcherPriority.Normal, token)
-            .Task.WaitAsync(token).GetAwaiter().GetResult();
+        if (_stopping) return;
+        _ = Dispatcher.BeginInvoke(new Action(() =>
+        {
+            if (_stopping) return;
+            try { action(); }
+            catch (Exception ex) { _logger.TryWrite("Error", "NotificationFailed", ex); }
+        }));
     }
 
-    private void OnBlockRequested(string processName, string displayName) => DispatchMonitorEvent(() =>
-    {
-        KillProcess(processName);
-        new UI.BlockedPopup(displayName).Show();
-    });
+    private void OnBlockRequested(string processName, string displayName) =>
+        DispatchMonitorEvent(() => new UI.BlockedPopup(displayName).Show());
 
     private void OnWarnRequested(string processName, string displayName) =>
         DispatchMonitorEvent(() => new UI.WarningPopup(displayName).Show());
-
-    private void OnBreakRequested(string processName, string displayName, int sessionId) => DispatchMonitorEvent(() =>
-    {
-        var rule = _db!.GetRules().FirstOrDefault(r => r.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase));
-        if (rule is null) return;
-        new UI.BreakOverlay(displayName, rule.BreakDurationMinutes).ShowDialog();
-        if (!_stopping) _monitor?.OnBreakCompleted(processName);
-    });
-
-    private void KillProcess(string processName)
-    {
-        if (_runtime.Profile == RuntimeProfile.Test)
-        {
-            // Test mode can terminate only dedicated helpers explicitly owned by this fixture.
-            if (!processName.Equals("ScreenTime.TestProcess", StringComparison.OrdinalIgnoreCase)) return;
-            try
-            {
-                var owned = JsonSerializer.Deserialize<OwnedProcessIdentity[]>(File.ReadAllText(_runtime.Paths.OwnedProcessesPath)) ?? [];
-                foreach (var identity in owned.Where(p => p.ProcessName.Equals(processName, StringComparison.OrdinalIgnoreCase)))
-                    identity.Terminate();
-            }
-            catch (Exception ex) { _logger.TryWrite("Error", "TestProcessTerminationFailed", ex); }
-            return;
-        }
-        foreach (var process in Process.GetProcessesByName(processName))
-        {
-            using (process)
-            {
-                try { process.Kill(); }
-                catch (Exception ex) { _logger.TryWrite("Error", "ProcessTerminationFailed", ex); }
-            }
-        }
-    }
 
     private void OpenSettings()
     {
@@ -185,8 +149,8 @@ public partial class App : WpfApplication
     {
         _stopping = true;
         _testCommands?.Stop();
-        // Shutdown can also originate from WPF/session exit. Cancellation releases the
-        // worker's dispatcher wait, so joining here cannot wait on this UI thread.
+        // Shutdown can also originate from WPF/session exit. Enforcement never waits
+        // on this dispatcher, so joining the worker here cannot create a UI deadlock.
         if (_monitor is not null)
         {
             try { _monitor.StopAsync().GetAwaiter().GetResult(); }

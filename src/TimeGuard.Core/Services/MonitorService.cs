@@ -1,59 +1,64 @@
-using System.Diagnostics;
 using TimeGuard.Models;
 
 namespace TimeGuard.Services;
 
-/// <summary>
-/// Background polling loop. Every 5 seconds it:
-///   1. Enumerates running processes
-///   2. Accumulates usage time in today's DailyUsage rows
-///   3. Tracks time-since-last-break per session
-///   4. Calls RulesEngine to get actions
-///   5. Fires events so App.xaml.cs can show popups and kill processes
-/// </summary>
+/// <summary>One serialized owner: observe, evaluate, persist, enforce, then notify.</summary>
 public sealed class MonitorService : IDisposable, IAsyncDisposable
 {
-    private readonly DatabaseService _db;
-    private readonly RulesEngine     _rules;
+    private readonly IStateStore _db;
+    private readonly RulesEngine _rules;
+    private readonly IProcessMonitor _processes;
+    private readonly EnforcementService _enforcement;
+    private readonly TimeProvider _time;
     private readonly CancellationTokenSource _cts = new();
     private readonly object _lifecycleGate = new();
+    private readonly SemaphoreSlim _tickGate = new(1, 1);
     private readonly IAppLogger? _logger;
-    private readonly Func<Dictionary<string, string>> _processSnapshot;
     private Task? _worker;
     private bool _stopped;
     private bool _cancellationDisposed;
+    private AppRule[] _rulesConfig;
+    private AppRule[]? _pendingConfig;
+    private DailyLog _log;
+    private readonly Dictionary<string, int> _sessions = new();
+    private IReadOnlyList<PolicyDecision> _decisions = Array.Empty<PolicyDecision>();
+    private IReadOnlyList<TerminationResult> _enforcementResults = Array.Empty<TerminationResult>();
 
     public Task Completion { get { lock (_lifecycleGate) return _worker ?? Task.CompletedTask; } }
     public Exception? LastFault { get; private set; }
     public CancellationToken StoppingToken { get; }
-
-    private AppConfig _config;
-    private DailyLog  _log;
-
-    // processName (lowercase) → (sessionDbId, timeSinceBreakMins)
-    private readonly Dictionary<string, (int SessionId, double TimeSinceBreak)> _sessions = new();
-
-    public event Action<string, string>? BlockRequested;      // (processName, displayName)
-    public event Action<string, string>? WarnRequested;       // (processName, displayName)
-    public event Action<string, string, int>? BreakRequested; // (processName, displayName, sessionId)
-
+    public IReadOnlyList<PolicyDecision> Decisions => Volatile.Read(ref _decisions);
+    public IReadOnlyList<TerminationResult> EnforcementResults => Volatile.Read(ref _enforcementResults);
+    public event Action<string, string>? BlockRequested;
+    public event Action<string, string>? WarnRequested;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
     private const double PollMinutes = 5.0 / 60.0;
 
-    public MonitorService(DatabaseService db, RulesEngine rules, AppConfig config, IAppLogger? logger = null)
-        : this(db, rules, config, logger, GetAllWindowedProcessNames) { }
-
-    internal MonitorService(DatabaseService db, RulesEngine rules, AppConfig config,
-        IAppLogger? logger, Func<Dictionary<string, string>> processSnapshot)
+    public MonitorService(IStateStore db, RulesEngine rules, AppConfig config, IAppLogger? logger = null,
+        IProcessMonitor? processes = null, IProcessTerminator? terminator = null, TimeProvider? time = null)
     {
-        _db     = db;
-        _rules  = rules;
-        _config = config;
+        _db = db;
+        _rules = rules;
         _logger = logger;
-        _processSnapshot = processSnapshot;
+        _processes = processes ?? new WindowsProcessMonitor(logger);
+        _enforcement = new EnforcementService(terminator ?? new WindowsProcessTerminator(), logger);
+        _time = time ?? TimeProvider.System;
+        _rulesConfig = CopyRules(config);
         StoppingToken = _cts.Token;
-        _log    = db.LoadTodayLog();
-        db.PurgeOldPassiveSessions(7);
+        _log = db.LoadLog(DateOnly.FromDateTime(_time.GetLocalNow().DateTime));
+    }
+
+    private static AppRule[] CopyRules(AppConfig config)
+    {
+        var rules = config.Rules.Select(rule => new AppRule
+        {
+            ProcessName = ProcessInstance.NormalizeKey(rule.ProcessName), DisplayName = rule.DisplayName,
+            Enabled = rule.Enabled, DaySchedules = rule.GetWeekSchedule()
+        }).ToArray();
+        if (rules.Any(r => string.IsNullOrWhiteSpace(r.ProcessName)) ||
+            rules.Select(r => r.ProcessName).Distinct().Count() != rules.Length)
+            throw new ArgumentException("Each configured application must have one nonempty canonical process key.");
+        return rules;
     }
 
     public void Start()
@@ -112,7 +117,13 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
             if (!_cancellationDisposed) _cts.Cancel();
             worker = _worker ?? Task.CompletedTask;
         }
-        try { await worker.ConfigureAwait(false); }
+        try
+        {
+            await worker.ConfigureAwait(false);
+            await _tickGate.WaitAsync().ConfigureAwait(false);
+            try { CloseAllSessions(); }
+            finally { _tickGate.Release(); }
+        }
         finally
         {
             lock (_lifecycleGate)
@@ -123,195 +134,113 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         }
     }
 
-    public void ReloadConfig(AppConfig config)
-    {
-        _config = config;
-
-        // Re-evaluate blocked entries against the new limits; unblock if the limit was raised.
-        var today = DateOnly.FromDateTime(DateTime.Now);
-        foreach (var entry in _log.Entries.Where(e => e.Blocked))
-        {
-            var rule = config.Rules.FirstOrDefault(r =>
-                r.ProcessName.Equals(entry.ProcessName, StringComparison.OrdinalIgnoreCase));
-            if (rule is null) continue;
-
-            if (!rule.HasDailyLimit || entry.UsageMinutes < rule.DailyLimitMinutes)
-            {
-                entry.Blocked = false;
-                // Reset warning so it can fire again as usage approaches the new limit
-                if (rule.HasDailyLimit && entry.UsageMinutes < rule.DailyLimitMinutes - 5)
-                    entry.WarningSent = false;
-                _db.UpsertUsageEntry(today, entry);
-            }
-        }
-
-        // Unset the overall cap flag if the new cap is higher than current total usage.
-        if (_log.OverallCapHit &&
-            (config.OverallDailyLimitMinutes == 0 ||
-             _log.TotalUsageMinutes < config.OverallDailyLimitMinutes))
-        {
-            _log.OverallCapHit = false;
-        }
-    }
-
-    /// <summary>Exposes whether the overall daily cap has been hit (used in tests).</summary>
-    public bool IsOverallCapHit => _log.OverallCapHit;
-
-    /// <summary>Called by App.xaml.cs after the break overlay is dismissed.</summary>
-    public void OnBreakCompleted(string processName)
-    {
-        var key = processName.ToLowerInvariant();
-        if (_sessions.TryGetValue(key, out var s))
-        {
-            _db.ResetBreakTimer(s.SessionId);
-            _sessions[key] = (s.SessionId, 0);
-        }
-    }
+    // UI callers only publish a private copy; no usage/session state is touched here.
+    public void ReloadConfig(AppConfig config) => Interlocked.Exchange(ref _pendingConfig, CopyRules(config));
 
     private async Task RunLoop(CancellationToken ct)
     {
-        var lastDate = DateOnly.FromDateTime(DateTime.Now);
-
         while (!ct.IsCancellationRequested)
         {
-            var today = DateOnly.FromDateTime(DateTime.Now);
-
-            if (today != lastDate)
-            {
-                _log = _db.LoadTodayLog();
-                CloseAllSessions();
-                lastDate = today;
-            }
-
-            var runningNames    = _processSnapshot();
-            var ruledRunning    = runningNames.Keys.Where(n => IsRuledProcess(n)).ToList();
-            var now             = TimeOnly.FromDateTime(DateTime.Now);
-
-            AccumulateUsage(runningNames);
-
-            var breakTimers = _sessions.ToDictionary(
-                kvp => kvp.Key,
-                kvp => kvp.Value.TimeSinceBreak);
-            var actions = _rules.Evaluate(ruledRunning, _log, _config, now, breakTimers);
-
-            foreach (var action in actions)
-            {
-                var entry = _log.GetOrCreate(action.ProcessName);
-
-                if (action.Kind == RulesEngine.ActionKind.Block)
-                {
-                    entry.Blocked = true;
-                    CloseSession(action.ProcessName);
-                    _db.UpsertUsageEntry(today, entry);
-                    BlockRequested?.Invoke(action.ProcessName, action.DisplayName);
-                }
-                else if (action.Kind == RulesEngine.ActionKind.WarnFiveMinutes)
-                {
-                    entry.WarningSent = true;
-                    _db.UpsertUsageEntry(today, entry);
-                    WarnRequested?.Invoke(action.ProcessName, action.DisplayName);
-                }
-                else if (action.Kind == RulesEngine.ActionKind.BreakDue)
-                {
-                    if (_sessions.TryGetValue(action.ProcessName.ToLowerInvariant(), out var s))
-                        BreakRequested?.Invoke(action.ProcessName, action.DisplayName, s.SessionId);
-                }
-            }
-
-            foreach (var (procName, displayName) in _rules.GetRelaunched(ruledRunning, _log, _config))
-                BlockRequested?.Invoke(procName, displayName);
-
-            _log.TotalUsageMinutes = _log.Entries.Sum(e => e.UsageMinutes);
-            if (_config.OverallDailyLimitMinutes > 0 &&
-                _log.TotalUsageMinutes >= _config.OverallDailyLimitMinutes)
-                _log.OverallCapHit = true;
-
+            await TickAsync(ct).ConfigureAwait(false);
             await Task.Delay(PollInterval, ct).ConfigureAwait(false);
         }
     }
 
-    private static Dictionary<string, string> GetAllWindowedProcessNames()
+    // Deterministic driver for tests; the same gate serializes test ticks and the worker.
+    internal async Task TickAsync(CancellationToken ct = default)
     {
-        // Returns processName (lowercase) → windowTitle for all visible windowed apps
-        var result = new Dictionary<string, string>();
-        foreach (var process in Process.GetProcesses())
+        await _tickGate.WaitAsync(ct).ConfigureAwait(false);
+        try
         {
-            using (process)
+            var now = _time.GetLocalNow().DateTime;
+            var today = DateOnly.FromDateTime(now);
+            if (today != _log.Date)
             {
-                try
+                CloseAllSessions();
+                _log = _db.LoadLog(today);
+            }
+            var pending = Interlocked.Exchange(ref _pendingConfig, null);
+            if (pending is not null) _rulesConfig = pending;
+            var configured = _rulesConfig.Where(r => r.Enabled).ToArray();
+            var keys = configured.Select(r => r.ProcessName).ToHashSet(StringComparer.Ordinal);
+            var instances = _processes.Snapshot(keys).Where(p => keys.Contains(p.AppKey)).Distinct().ToArray();
+            var running = instances.Select(p => p.AppKey).ToHashSet(StringComparer.Ordinal);
+            foreach (var name in _sessions.Keys.Where(n => !running.Contains(n)).ToArray()) CloseSession(name);
+            foreach (var name in running)
+                if (!_sessions.ContainsKey(name)) _sessions[name] = _db.OpenSession(name);
+
+            var decisions = new List<PolicyDecision>();
+            foreach (var rule in _rulesConfig)
+            {
+                var snapshot = PolicySnapshot.Capture(rule, _log, TimeOnly.FromDateTime(now), running.Contains(rule.ProcessName));
+                if (pending is not null && (snapshot.DailyLimitMinutes == 0 || snapshot.DailyLimitMinutes - snapshot.UsageMinutes > 5))
                 {
-                    var title = process.MainWindowTitle;
-                    if (!string.IsNullOrWhiteSpace(title))
-                        result.TryAdd(process.ProcessName.ToLowerInvariant(), title);
+                    var existing = _log.Entries.FirstOrDefault(e => e.ProcessName == rule.ProcessName);
+                    if (existing?.WarningSent == true)
+                    {
+                        existing.WarningSent = false;
+                        _db.UpsertUsageEntry(today, existing);
+                        snapshot = snapshot with { WarningSent = false };
+                    }
                 }
-                catch (InvalidOperationException) { /* Process exited during enumeration. */ }
-                catch (System.ComponentModel.Win32Exception) { /* Inaccessible process. */ }
+                var decision = _rules.Evaluate(snapshot);
+                if (rule.Enabled && snapshot.IsRunning && decision.MayContinue)
+                {
+                    // Preserve minute storage and five-second sampling for Phase 2. Denied
+                    // launches are evaluated first and cannot spend the next permitted quota.
+                    var entry = _log.GetOrCreate(rule.ProcessName);
+                    entry.UsageMinutes += PollMinutes;
+                    _db.UpsertUsageEntry(today, entry);
+                    snapshot = snapshot with { UsageMinutes = entry.UsageMinutes };
+                    decision = _rules.Evaluate(snapshot);
+                }
+                if (decision.WarnFiveMinutes)
+                {
+                    var entry = _log.GetOrCreate(rule.ProcessName);
+                    entry.WarningSent = true;
+                    _db.UpsertUsageEntry(today, entry);
+                }
+                decisions.Add(decision);
+            }
+            Volatile.Write(ref _decisions, decisions.AsReadOnly());
+            var results = new List<TerminationResult>();
+            foreach (var decision in decisions.Where(d => d.TerminationRequired))
+                foreach (var instance in instances.Where(p => p.AppKey == decision.AppKey))
+                    results.Add(await _enforcement.EnforceAsync(decision, instance, ct).ConfigureAwait(false));
+            Volatile.Write(ref _enforcementResults, results.AsReadOnly());
+            // All targets are enforced before any UI subscriber is invoked. WPF enqueues
+            // asynchronously; subscriber exceptions are diagnostics, never worker failures.
+            foreach (var decision in decisions)
+            {
+                if (decision.TerminationRequired) Notify(BlockRequested, decision);
+                else if (decision.WarnFiveMinutes) Notify(WarnRequested, decision);
             }
         }
-        return result;
+        finally { _tickGate.Release(); }
     }
 
-    private bool IsRuledProcess(string processNameLower) =>
-        _config.Rules.Any(r => r.Enabled && r.ProcessName.ToLowerInvariant() == processNameLower);
-
-    private void AccumulateUsage(Dictionary<string, string> running)
+    private void Notify(Action<string, string>? handlers, PolicyDecision decision)
     {
-        var today      = DateOnly.FromDateTime(DateTime.Now);
-
-        // Open new sessions for newly-seen processes
-        foreach (var (name, title) in running)
+        if (handlers is null) return;
+        foreach (Action<string, string> handler in handlers.GetInvocationList())
         {
-            if (!_sessions.ContainsKey(name))
-            {
-                var isPassive = !IsRuledProcess(name);
-                var sessionId = _db.OpenSession(name, title, isPassive);
-                _sessions[name] = (sessionId, 0);
-            }
-            else
-            {
-                // Update window title on each tick (keep last seen)
-                _db.UpdateSessionTitle(_sessions[name].SessionId, title);
-            }
-        }
-
-        // Close sessions for processes that stopped
-        foreach (var name in _sessions.Keys.ToList())
-            if (!running.ContainsKey(name))
-                CloseSession(name);
-
-        // Accumulate usage time
-        foreach (var (name, _) in running)
-        {
-            if (_log.IsBlocked(name)) continue;
-
-            var entry = _log.GetOrCreate(name);
-            entry.UsageMinutes += PollMinutes;
-
-            if (_sessions.TryGetValue(name, out var s))
-            {
-                var newBreak = s.TimeSinceBreak + PollMinutes;
-                _sessions[name] = (s.SessionId, newBreak);
-                if (IsRuledProcess(name))
-                    _db.UpdateSession(s.SessionId, newBreak);
-            }
-
-            _db.UpsertUsageEntry(today, entry);
+            try { handler(decision.AppKey, decision.DisplayName); }
+            catch (OperationCanceledException) when (StoppingToken.IsCancellationRequested) { }
+            catch (Exception ex) { _logger.TryWrite("Error", "NotificationFailed", ex); }
         }
     }
 
-    private void CloseSession(string processName)
+    private void CloseSession(string name)
     {
-        if (!_sessions.TryGetValue(processName, out var s)) return;
-        _db.CloseSession(s.SessionId, s.TimeSinceBreak);
-        _sessions.Remove(processName);
+        if (!_sessions.TryGetValue(name, out var session)) return;
+        _db.CloseSession(session);
+        _sessions.Remove(name);
     }
 
     private void CloseAllSessions()
     {
-        foreach (var name in _sessions.Keys.ToList())
-            CloseSession(name);
+        foreach (var name in _sessions.Keys.ToArray()) CloseSession(name);
     }
-
     public void Dispose()
     {
         // Nonblocking cancellation: a UI caller may be servicing a worker event.

@@ -75,11 +75,13 @@ public class AppFixture : IDisposable
         signal.Set();
     }
 
-    public OwnedProcessIdentity LaunchHelper()
+    public OwnedProcessIdentity LaunchHelper(bool headless = false)
     {
-        using var process = Process.Start(new ProcessStartInfo(
+        var info = new ProcessStartInfo(
             Path.Combine(AppContext.BaseDirectory, "Helper", "ScreenTime.TestProcess.exe"))
-            { UseShellExecute = false })!; // A visible test window exercises existing title-based discovery.
+            { UseShellExecute = false };
+        if (headless) info.ArgumentList.Add("--headless");
+        using var process = Process.Start(info)!;
         var identity = OwnedProcessIdentity.Capture(process);
         _helpers.Add(identity);
         Directory.CreateDirectory(Runtime.Paths.RuntimeDirectory);
