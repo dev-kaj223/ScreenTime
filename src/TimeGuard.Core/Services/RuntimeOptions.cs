@@ -15,6 +15,7 @@ public sealed class RuntimeOptions
     public string MutexName { get; }
     public string SettingsEventName => MutexName + "-Settings";
     public string StopEventName => MutexName + "-Stop";
+    public string NoticeEventName => MutexName + "-NoticePreview";
 
     private RuntimeOptions(RuntimeProfile profile, AppDataPaths paths)
     {

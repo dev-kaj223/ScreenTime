@@ -20,7 +20,7 @@ public class Phase4PersistenceTests
     {
         _ = new DatabaseService(p.Runtime.Paths);
         using var c = Open(p);
-        c.Execute("DROP TABLE GraceProcesses; DROP TABLE GraceEpisodes; ALTER TABLE DailyUsage DROP COLUMN GraceSeconds; PRAGMA user_version=2;");
+        c.Execute("DROP TABLE NotificationReceipts; DROP TABLE GraceProcesses; DROP TABLE GraceEpisodes; ALTER TABLE DailyUsage DROP COLUMN GraceSeconds; PRAGMA user_version=2;");
     }
 
     [Fact] public void VersionTwoUpgrade_Backup_UsagePreserved_Idempotent_Constraints()
@@ -29,7 +29,7 @@ public class Phase4PersistenceTests
         using var c = Open(p);
         c.Execute("INSERT INTO DailyUsage(Date,ProcessName,ObservedSeconds,QuotaSeconds) VALUES('2026-09-21','helper',75,60)");
         var db = new DatabaseService(p.Runtime.Paths);
-        Assert.Equal(3, c.ExecuteScalar<int>("PRAGMA user_version"));
+        Assert.Equal(4, c.ExecuteScalar<int>("PRAGMA user_version"));
         Assert.Equal(0, db.LoadLog(Day).Entries.Single().GraceSeconds);
         Assert.Equal(75, db.LoadLog(Day).Entries.Single().ObservedSeconds);
         using var backup = new SqliteConnection($"Data Source={p.Runtime.Paths.DatabasePath}.pre-phase4.bak;Mode=ReadOnly");

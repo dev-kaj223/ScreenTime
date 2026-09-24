@@ -21,6 +21,10 @@ public partial class App : WpfApplication
     private EventWaitHandle? _settingsEvent;
     private EventWaitHandle? _stopEvent;
     private DispatcherTimer? _testCommands;
+    private WpfNotificationService? _notifications;
+    private EventWaitHandle? _noticeEvent;
+    private TimeGuard.Models.NotificationRequest? _previewNotice;
+    private int _previewIndex;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -40,6 +44,14 @@ public partial class App : WpfApplication
             _singleInstanceMutex = new Mutex(true, _runtime.MutexName, out _ownsMutex);
             if (!_ownsMutex) { Shutdown(); return; }
             _logger.TryWrite("Information", "ApplicationStarting");
+            if (e.Args.Contains("--preview-notices"))
+            {
+                if (_runtime.Profile != RuntimeProfile.Test)
+                    throw new ArgumentException("Notice preview requires an isolated --test-profile.");
+                // Deliberately no database, monitor, process discovery or enforcement in preview.
+                StartNoticePreview();
+                return;
+            }
             _db = new DatabaseService(_runtime.Paths);
             var config = _db.LoadConfig();
             if (config.IsFirstRun)
@@ -54,8 +66,10 @@ public partial class App : WpfApplication
                 ? new TestProcessScope(_runtime.Paths, _logger).Contains : null;
             _monitor = new MonitorService(_db, new RulesEngine(), config, _logger,
                 new WindowsProcessMonitor(_logger, targetScope), new WindowsProcessTerminator(targetScope));
-            _monitor.BlockRequested += OnBlockRequested;
-            _monitor.WarnRequested += OnWarnRequested;
+            _notifications = new WpfNotificationService(
+                () => _monitor.TryReadNotification(out var request) ? request : null,
+                _monitor.IsNotificationCurrent, _logger,
+                e.Args.Contains("--notice-diagnostics") ? WriteNoticeDiagnostic : null);
 
             _power = new PowerSessionHelper(_monitor);
             _monitor.Start();
@@ -112,6 +126,7 @@ public partial class App : WpfApplication
         if (_stopping) return;
         _stopping = true;
         _testCommands?.Stop();
+        _notifications?.Dispose();
         _power?.Dispose();
         _monitor?.Dispose();
         if (_monitor is not null)
@@ -122,22 +137,41 @@ public partial class App : WpfApplication
         Shutdown(exitCode);
     }
 
-    private void DispatchMonitorEvent(Action action)
+    private void WriteNoticeDiagnostic(UI.NoticeDiagnostic sample)
     {
-        if (_stopping) return;
-        _ = Dispatcher.BeginInvoke(new Action(() =>
+        try
         {
-            if (_stopping) return;
-            try { action(); }
-            catch (Exception ex) { _logger.TryWrite("Error", "NotificationFailed", ex); }
-        }));
+            var path = System.IO.Path.Combine(_runtime.Paths.Root, "notice-diagnostics.jsonl");
+            System.IO.Directory.CreateDirectory(_runtime.Paths.Root);
+            // Opt-in bounded local HWND/boolean samples only; never window titles or input contents.
+            if (System.IO.File.Exists(path) && new System.IO.FileInfo(path).Length > 1024 * 1024)
+                System.IO.File.Move(path, path + ".1", true);
+            System.IO.File.AppendAllText(path, System.Text.Json.JsonSerializer.Serialize(sample) + Environment.NewLine);
+        }
+        catch (Exception ex) { _logger.TryWrite("Error", "NoticeDiagnosticFailed", ex); }
     }
 
-    private void OnBlockRequested(string processName, string displayName) =>
-        DispatchMonitorEvent(() => new UI.BlockedPopup(displayName).Show());
-
-    private void OnWarnRequested(string processName, string displayName) =>
-        DispatchMonitorEvent(() => new UI.WarningPopup(displayName).Show());
+    private void StartNoticePreview()
+    {
+        _noticeEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.NoticeEventName);
+        _stopEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.StopEventName);
+        _notifications = new WpfNotificationService(() => Interlocked.Exchange(ref _previewNotice, null),
+            request => DateTimeOffset.UtcNow < request.ValidUntilUtc, _logger, WriteNoticeDiagnostic);
+        _testCommands = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
+        _testCommands.Tick += async (_, _) =>
+        {
+            if (_stopEvent.WaitOne(0)) { await StopAndShutdownAsync(0); return; }
+            if (!_noticeEvent.WaitOne(0)) return;
+            var kind = (TimeGuard.Models.NotificationKind)(_previewIndex++ % 5);
+            var now = DateTimeOffset.UtcNow;
+            var minutes = kind == TimeGuard.Models.NotificationKind.QuotaTenMinutes ? 10 :
+                kind == TimeGuard.Models.NotificationKind.GraceStarted ? 20 : 5;
+            var grace = kind is TimeGuard.Models.NotificationKind.GraceStarted or TimeGuard.Models.NotificationKind.GraceFiveMinutes;
+            _previewNotice = new("preview", "preview", "ScreenTime preview", kind, now, now.AddSeconds(15),
+                TimeSpan.FromMinutes(minutes), grace ? "preview" : null, grace ? now.AddMinutes(minutes) : null);
+        };
+        _testCommands.Start();
+    }
 
     private void OpenSettings()
     {
@@ -153,6 +187,7 @@ public partial class App : WpfApplication
         _power?.Dispose();
         _stopping = true;
         _testCommands?.Stop();
+        _notifications?.Dispose();
         // Shutdown can also originate from WPF/session exit. Enforcement never waits
         // on this dispatcher, so joining the worker here cannot create a UI deadlock.
         if (_monitor is not null)
@@ -163,6 +198,7 @@ public partial class App : WpfApplication
         _hotkey?.Dispose();
         _settingsEvent?.Dispose();
         _stopEvent?.Dispose();
+        _noticeEvent?.Dispose();
         if (_ownsMutex) _singleInstanceMutex?.ReleaseMutex();
         _singleInstanceMutex?.Dispose();
         _logger.TryWrite("Information", "ApplicationStopped");

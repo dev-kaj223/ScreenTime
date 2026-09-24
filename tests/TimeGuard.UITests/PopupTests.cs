@@ -13,51 +13,49 @@ public class PopupTests : IDisposable
     public void Dispose() => _fx.Dispose();
 
     [Fact]
-    public void BlockedPopup_ShowsCorrectTitle()
+    public void BlockedNotice_ShowsCorrectTitle_AndEnforces()
     {
         _fx.EnsureHelperRunning();
         var popups = _fx.WaitForInitialBlockPopups();
         foreach (var popup in popups)
-            Assert.Contains("Time", popup.Title);
+            Assert.Equal("ScreenTime notice", popup.Title);
         Assert.True(_fx.HelperExited());
-        ClosePopupsThroughOk(popups);
+        WaitForAutomaticDismissal(popups);
     }
 
     [Fact]
-    public void BlockedPopup_OkButton_ClosesPopup()
+    public void BlockedNotice_HasNoButton_AndDismissesWithoutInteraction()
     {
         _fx.EnsureHelperRunning();
         var popups = _fx.WaitForInitialBlockPopups();
-        ClosePopupsThroughOk(popups);
+        foreach (var popup in popups)
+            Assert.Empty(popup.FindAllDescendants(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.Button)));
+        WaitForAutomaticDismissal(popups);
 
         var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
-        Assert.False(windows.Any(w => w.Title?.Contains("Time's Up") == true),
-            "BlockedPopup should close after clicking OK.");
+        Assert.DoesNotContain(windows, w => w.Title == "ScreenTime notice");
     }
 
     [Fact]
     public void ClosingPopup_DoesNotPermitAnOverQuotaRelaunch()
     {
         _fx.EnsureHelperRunning();
-        ClosePopupsThroughOk(_fx.WaitForInitialBlockPopups());
+        WaitForAutomaticDismissal(_fx.WaitForInitialBlockPopups());
         Assert.True(_fx.HelperExited());
         _fx.EnsureHelperRunning();
-        var popups = _fx.WaitForInitialBlockPopups();
-        Assert.True(_fx.HelperExited());
-        ClosePopupsThroughOk(popups);
+        Assert.True(SpinWait.SpinUntil(_fx.HelperExited, TimeSpan.FromSeconds(12)));
+        // The optional blocked notice is rate-limited; suppression never permits relaunch.
     }
 
-    private void ClosePopupsThroughOk(Window[] popups)
+    private void WaitForAutomaticDismissal(Window[] popups)
     {
         foreach (var popup in popups)
         {
             var handle = popup.Properties.NativeWindowHandle.Value;
-            // Invoke the actual button: overlapping topmost windows can redirect a coordinate click.
-            popup.FindButton("OK").Invoke();
             Assert.True(SpinWait.SpinUntil(() =>
                 !_fx.App.GetAllTopLevelWindows(_fx.Automation)
-                    .Any(w => w.Properties.NativeWindowHandle.Value == handle), TimeSpan.FromSeconds(5)),
-                "BlockedPopup should close after clicking OK.");
+                    .Any(w => w.Properties.NativeWindowHandle.Value == handle), TimeSpan.FromSeconds(8)),
+                "Passive notice must close without input.");
         }
     }
 }
@@ -98,10 +96,9 @@ public class PopupTestFixture : AppFixture
         // One decision produces one popup; the old duplicate relaunch pass is gone.
         Assert.True(SpinWait.SpinUntil(() =>
         {
-            popups = App.GetAllTopLevelWindows(Automation).Where(w => w.Title == "Time's Up").ToArray();
-            return popups.Length == 1 && popups.All(w =>
-                w.FindFirstDescendant(cf => cf.ByName("OK")) is { IsEnabled: true, IsOffscreen: false });
-        }, TimeSpan.FromSeconds(20)), "Expected one initial-block popup and their enabled OK buttons.");
+            popups = App.GetAllTopLevelWindows(Automation).Where(w => w.Title == "ScreenTime notice").ToArray();
+            return popups.Length == 1;
+        }, TimeSpan.FromSeconds(20)), "Expected one passive blocked notice.");
         return popups;
     }
 

@@ -11,6 +11,25 @@ namespace TimeGuard.Services;
 /// </summary>
 public class DatabaseService : IStateStore
 {
+    // A receipt means selected for best-effort delivery, not acknowledged or displayed.
+    // It has no foreign-key cascade from rules and cannot mutate grace or usage.
+    public bool TryRecordNotification(NotificationRequest request)
+    {
+        using var conn = Open();
+        var superseding = request.Kind switch
+        {
+            NotificationKind.QuotaTenMinutes => request.ReceiptKey.Replace(":QuotaTenMinutes", ":QuotaFiveMinutes"),
+            NotificationKind.GraceStarted => request.ReceiptKey.Replace(":GraceStarted", ":GraceFiveMinutes"),
+            _ => request.ReceiptKey
+        };
+        return conn.Execute("""
+            INSERT INTO NotificationReceipts(ReceiptKey, AppKey, Kind, RequestedAtUtcTicks)
+            SELECT @ReceiptKey, @AppKey, @Kind, @Ticks
+            WHERE NOT EXISTS(SELECT 1 FROM NotificationReceipts WHERE ReceiptKey=@superseding)
+            ON CONFLICT(ReceiptKey) DO NOTHING
+            """, new { request.ReceiptKey, request.AppKey, Kind = (int)request.Kind, Ticks = request.CreatedAtUtc.UtcTicks, superseding }) == 1;
+    }
+
     private readonly string _connectionString;
 
     public DatabaseService(string? connectionString = null)

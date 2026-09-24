@@ -33,6 +33,7 @@ public class AppFixture : IDisposable
     }
 
     protected virtual void SeedDatabase() { }
+    protected virtual bool PreviewNotices => false;
 
     protected void SaveConfigToDb(string hash, string salt)
     {
@@ -60,6 +61,8 @@ public class AppFixture : IDisposable
         { UseShellExecute = false };
         info.ArgumentList.Add("--test-profile");
         info.ArgumentList.Add(Runtime.Paths.Root);
+        info.ArgumentList.Add("--notice-diagnostics");
+        if (PreviewNotices) info.ArgumentList.Add("--preview-notices");
         info.Environment.Remove("TIMEGUARD_TEST_DB");
         _automation = new UIA3Automation();
         _app = Application.Launch(info);
@@ -75,12 +78,17 @@ public class AppFixture : IDisposable
         signal.Set();
     }
 
-    public OwnedProcessIdentity LaunchHelper(bool headless = false)
+    public OwnedProcessIdentity LaunchHelper(bool headless = false, bool inputProbe = false)
     {
         var info = new ProcessStartInfo(
             Path.Combine(AppContext.BaseDirectory, "Helper", "ScreenTime.TestProcess.exe"))
             { UseShellExecute = false };
         if (headless) info.ArgumentList.Add("--headless");
+        if (inputProbe)
+        {
+            info.ArgumentList.Add("--input-probe");
+            info.ArgumentList.Add(Path.Combine(Runtime.Paths.Root, "helper-input.txt"));
+        }
         using var process = Process.Start(info)!;
         var identity = OwnedProcessIdentity.Capture(process);
         _helpers.Add(identity);

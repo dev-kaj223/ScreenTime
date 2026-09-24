@@ -32,7 +32,9 @@ Phases 1–4 are complete, validated, committed and pushed per the owner. Remain
 - Confirmed exit/crash of all captured instances completes the episode early; partial exit leaves only surviving captures eligible. Inaccessible observations are not proof of exit. Consumed episode history survives restart and rule recreation, preventing another grant for that quota date.
 - Persist expiry before hard termination at the durable deadline, confirm real exit and retry failures without extending time. A carried expired survivor must stop even if a new day's allowance exists. After completion, new launches depend on current downtime/quota; fresh quota never overrides downtime.
 
-## Phase 5: gaming-safe notifications (approved, not implemented here)
+## Phase 5: gaming-safe notifications (candidate awaiting acceptance)
+
+The minimal WPF candidate, receipt model, validation evidence and owner's manual procedure are recorded in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md). Independent review and target-setup Apex acceptance remain gates; implementation/helper results do not establish gaming safety.
 
 The original interactive/topmost TimeGuard warning caused visible Apex disruption. Gaming-safe notifications are non-negotiable; the precise contribution of focus and rendering remains a measurement question.
 
