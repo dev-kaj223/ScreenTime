@@ -1,0 +1,53 @@
+# ScreenTime product requirements
+
+This is the current product contract distilled from the approved [architecture](SCREEN_TIME_ARCHITECTURE_PLAN.md), [Phase 1](PHASE1_IMPLEMENTATION.md)–[Phase 4](PHASE4_IMPLEMENTATION.md) records, and the owner's approved remaining-product decisions restated on 2026-09-24. See [DECISIONS.md](DECISIONS.md) for provenance. It does not authorize implementing the next phase.
+
+Phases 1–4 are complete, validated, committed and pushed per the owner. Remaining requirements below are approved future scope, not claims that they already exist. Historical reports retain their original validation limits and working-tree status; current source/tests establish actual behavior. Upstream TimeGuard README features are not the ScreenTime contract.
+
+## Product and safety boundary
+
+- Lightweight, local-only, offline-capable Windows ScreenTime-style app, in the interactive user's session. Evolve the existing .NET/WPF app rather than adding a privileged service or new framework.
+- MVP target: Apex Legends process **`r5apex_dx12`**, canonical lowercase without `.exe`. Keep app-keyed models; multi-app coordination is not MVP scope.
+- Behavioral enforcement rather than adversarial surveillance. No drivers, injection, game memory inspection, DirectX/graphics hooks, anti-cheat interaction, network filtering, or similar invasive controls. Do not inspect ranked/match state.
+- Preserve installed `%AppData%\TimeGuard` data, logs, startup state and live processes. Development uses `%AppData%\ScreenTime-Dev`; tests use unique disposable profiles. No automatic TimeGuard import, fallback into its profile, or development/test autostart registration.
+- Enforcement targets a concrete process identity: canonical app name, PID, creation time and Windows session, with current-user ownership revalidated on the retained process handle. Never terminate by name alone, kill a tree/launcher/anti-cheat service, or elevate automatically. Failed termination stays denied, is diagnosed and can be retried.
+- Keep work lightweight: roughly five-second ordinary discovery plus known-boundary wakeups, bounded local diagnostics, no busy loops or unrelated-app history. Measure footprint and game performance; do not claim unmeasured budgets or zero stutter.
+
+## Allowance, downtime and accounting
+
+- Selected-app daily allowance and explicit downtime are separate policy facts. Temporary downtime must not become a persisted daily ban. Disabled rules are unrestricted; a zero daily allowance retains the existing unlimited meaning.
+- Acceptance configuration example: **Mon–Thu 60 minutes, Fri 90 minutes, Sat–Sun 120 minutes**, with downtime **00:00–08:00 and 08:00–17:00**. These are configurable examples, never policy constants. Adjacent periods deny continuously until 17:00.
+- Downtime supports cross-midnight/week boundaries and merged overlap/adjacency. Intervals include their start and exclude their end; next availability also considers quota. Preserve ordinary clock, time-zone and DST handling.
+- Account measured awake runtime for configured enabled apps, including background/minimized runtime, once per app even with multiple instances. Use monotonic elapsed time with confirmed instance continuity; do not infer use at first discovery, during sleep, outages or uncertain gaps. Preserve the implemented rebase rules and fractional accounting described in [Phase 3](PHASE3_IMPLEMENTATION.md).
+- Persist observed, quota and grace seconds separately; grace seconds are a subset of observed time. Denied runtime can be observed without charging quota. UI visibility, window title, focus and game state are not accounting authorities.
+- Local midnight creates a new allowance bucket; it neither bypasses downtime nor resets existing grace. Do not reconstruct unobserved runtime after restart.
+
+## Finish Current Session
+
+- Legitimate quota exhaustion during continuous permitted runtime grants **one persisted 20-minute Finish Current Session episode per app/quota date**. The deadline is the measured exhaustion instant plus 20 minutes, not the later popup or observation time.
+- Atomically persist usage, original UTC deadline and captured exact instances before publishing continuation permission. Only instances observed as eligible at the crossing may use grace; the capture set and deadline cannot expand. No uncommitted grant or replacement deadline on persistence failure.
+- First discovery with exhausted usage, exhausted startup without an episode, relaunch/replacement/PID reuse, and an allowance decrease that exhausts prior usage do not earn grace. Downtime alone, including a crossing exactly when downtime begins, does not generate grace.
+- Existing grace may overlap newly starting downtime and midnight. Only the captured instances continue; new/replacement instances receive no grace. Grace runtime does not consume the next day's quota.
+- The persisted UTC deadline survives ScreenTime restart, sleep and midnight. Sleep adds no usage but does not pause the deadline. Restart reconciles exact identities and permits only the original remaining time; overdue resume/restart enforces immediately when execution resumes.
+- Confirmed exit/crash of all captured instances completes the episode early; partial exit leaves only surviving captures eligible. Inaccessible observations are not proof of exit. Consumed episode history survives restart and rule recreation, preventing another grant for that quota date.
+- Persist expiry before hard termination at the durable deadline, confirm real exit and retry failures without extending time. A carried expired survivor must stop even if a new day's allowance exists. After completion, new launches depend on current downtime/quota; fresh quota never overrides downtime.
+
+## Phase 5: gaming-safe notifications (approved, not implemented here)
+
+The original interactive/topmost TimeGuard warning caused visible Apex disruption. Gaming-safe notifications are non-negotiable; the precise contribution of focus and rendering remains a measurement question.
+
+- First evaluate a minimal WPF notice with `ShowActivated=false`, appropriate Windows no-activate/tool-window behavior (`WS_EX_NOACTIVATE`, `WS_EX_TOOLWINDOW`), and verified native mouse pass-through. No buttons, keyboard focus, controller/mouse capture, activation calls, persistent overlay, or game/graphics hooks. Automatically dismiss after approximately 5–8 seconds.
+- Follow the detailed experiment and fallback gate in [architecture section 6](SCREEN_TIME_ARCHITECTURE_PLAN.md#6-notification-architecture). A WPF property alone does not prove pass-through or gaming safety. Consider a native/heavier alternative only if measured results justify it; do not silently relax input/non-interference requirements.
+- Notification semantics: approximately 10-minute quota warning, 5-minute quota warning, grace-start/finish-current-session notice, 5-minute grace warning, then hard enforcement at the stored deadline. Display actual remaining grace on recovery; deduplicate/coalesce and discard stale warnings.
+- UI stalls, suppressed notices, notification failure and acknowledgement must never determine enforcement or grant/extend grace.
+- Apex validation starts in training/non-ranked gameplay. Record foreground HWND, minimization/focus, mouse/keyboard/controller behavior, dismissal and first/subsequent frame-time effects on the target setup. Ranked validation is a later gate; never provoke a ranked penalty as a test. Helper/automation success alone does not establish Apex acceptance.
+
+## Phase 6: tray/status and protected actions (approved, not implemented here)
+
+- Read-only usage/status is available without a password. Include remaining allowance, current restriction/grace state, grace time remaining, next downtime and next availability; present fresh-but-unavailable quota truthfully during downtime.
+- Settings and Exit require the protected password. Gate weakening actions at the command boundary, not merely by hiding UI controls. Preserve password hashing; wrong/cancelled authentication must not change policy or stop monitoring.
+- Closing a panel does not stop enforcement. Status consumes policy snapshots; it does not own enforcement state. Expanded history/dashboard or multi-app selection UX is not a prerequisite.
+
+## Deferred unless explicitly promoted
+
+Overall multi-app caps; forced breaks; passive unrelated-app tracking; TimeGuard import; deliberate clock-tamper defense; automatic crash watchdog/restart (including Task Scheduler recovery); and broad dashboard/history redesign remain deferred. Retained legacy fields/tests do not authorize reactivating those features. Ordinary restart reconciliation, sleep/wake, midnight and persistent grace are already essential behavior, not deferred recovery features.

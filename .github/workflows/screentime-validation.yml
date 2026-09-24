@@ -1,0 +1,36 @@
+name: ScreenTime validation
+
+on:
+  pull_request:
+    branches: [ screentime-dev ]
+  push:
+    branches: [ screentime-dev ]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: Build and Core tests
+    runs-on: windows-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+      - name: Restore
+        run: dotnet restore TimeGuard.sln
+      - name: Build
+        run: dotnet build TimeGuard.sln --no-restore --no-incremental -c Release
+      - name: Core tests
+        run: dotnet test tests/TimeGuard.Tests/TimeGuard.Tests.csproj --no-build -c Release --logger trx
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: screentime-core-results
+          path: tests/TimeGuard.Tests/TestResults/*.trx
+          if-no-files-found: ignore
+          retention-days: 14

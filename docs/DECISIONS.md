@@ -1,0 +1,43 @@
+# Approved decisions
+
+This compact ledger records accepted choices, not a new product proposal. [PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md) is the consolidated contract; [REVIEW_PROTOCOL.md](REVIEW_PROTOCOL.md) governs delivery. Detailed historical reasoning stays in the linked sources.
+
+## Authority and phase status
+
+The owner confirmed on 2026-09-24 that Phases 1–4 are complete, validated, committed and pushed. Local history ends at `3b1dbec` (Phase 4), following `90f7538` (Phase 3), `d57ffcd` (Phase 2) and the Phase 1 commits. Original report statements such as “no commit or push” describe their writing time. Preserve those documents and history; do not manufacture later test results or erase their stated limitations.
+
+Use the current approved requirements and this ledger for product intent, the architecture for detailed phase design, and source/tests for implementation evidence. Later approved decisions can refine earlier design proposals; record the change and rationale here. An implementation or test is not authorization to change the product. Genuine contradictions or unspecified product behavior require an owner decision; routine implementation choices do not.
+
+## Accepted product choices
+
+| ID | Decision and rationale | Source |
+|---|---|---|
+| D01 | Evolve the lightweight Windows .NET/WPF app with Core policy/enforcement and SQLite storage. Keep `TimeGuard.*` internal names; avoid a rewrite or privileged service. | [Architecture: MVP and sections 3–5](SCREEN_TIME_ARCHITECTURE_PLAN.md), [Phase 2](PHASE2_IMPLEMENTATION.md) |
+| D02 | Behavioral, local/offline enforcement, not adversarial surveillance. No drivers, injection, game memory inspection, DirectX/graphics hooks, anti-cheat interaction, network filtering or similar invasive controls. | Architecture MVP; owner reaffirmation, 2026-09-24 |
+| D03 | MVP selected game is Apex Legends, process `r5apex_dx12`. App-keyed design is retained without making coordinated multi-app behavior a prerequisite. | Architecture MVP; exact process approved by owner, 2026-09-24 |
+| D04 | Configurable acceptance example: Mon–Thu 60 min, Fri 90 min, Sat–Sun 120 min; downtime 00:00–08:00 and 08:00–17:00. These values are not policy constants. Quota and downtime remain separate. | Architecture MVP/section 3; [Phase 3](PHASE3_IMPLEMENTATION.md); owner reaffirmation |
+| D05 | Measured awake runtime with exact-instance continuity, local-date quota buckets and separate observed/quota/grace counters. Midnight creates allowance but cannot bypass downtime; sleep/outages do not invent usage. | Phase 3; [Phase 4](PHASE4_IMPLEMENTATION.md) |
+| D06 | One atomic, persisted 20-minute Finish Current Session episode per app/quota date after legitimate quota crossing. Capture only eligible exact instances; relaunch/replacement gets no grace. No grant from downtime, exhausted startup or retroactive allowance decrease. | Architecture section 7; Phase 4 grant criteria and tests |
+| D07 | Grace deadline and captures are immutable, survive restart/sleep/midnight and may overlap newly starting downtime. Grace does not consume next-day quota. Confirmed exit completes early; expiry is durable before termination; consumed history survives rule recreation. | Architecture sections 3/7; Phase 4 |
+| D08 | Enforce using revalidated name/PID/creation/session and current-user ownership on a retained handle. UI/notification failure cannot affect permission or enforcement. No name-wide/tree kills, automatic elevation or game-process test fixtures. | [Phase 1](PHASE1_IMPLEMENTATION.md), Phase 2, Phase 4 |
+| D09 | Installed TimeGuard data, logs, startup registration and processes remain untouched. Isolated development/test profiles only; no import or fallback into TimeGuard. | Architecture section 4; Phases 1–4 |
+| D10 | Original interactive/topmost TimeGuard warning visibly disrupted Apex. Gaming-safe notifications are mandatory; do not infer a verified technical cause or performance guarantee from that observation. | Architecture section 2/6; owner reaffirmation |
+| D11 | Phase 5 first evaluates a minimal WPF notice: `ShowActivated=false`, Windows no-activate/tool-window behavior, verified pass-through, no buttons/focus/controller or mouse capture, brief automatic dismissal (about 5–8 seconds), no persistent overlay or game/graphics hooks. Native/heavier fallback requires measurement evidence. | Architecture sections 6/11; owner reaffirmation |
+| D12 | Warning sequence is approximately 10-minute quota, 5-minute quota, grace-start/finish-current-session, 5-minute grace, then hard enforcement at the durable deadline. Delivery is passive, deduplicated and never a time extension or enforcement prerequisite. | Architecture section 6; owner reaffirmation |
+| D13 | Apex notification acceptance begins in training/non-ranked gameplay; ranked validation is a later gate. Measure actual focus/input/dismissal/frame-time effects. Do not test by provoking ranked penalties. | Architecture sections 6/10/11; owner reaffirmation |
+| D14 | Phase 6 provides password-free read-only usage/status: remaining allowance, restriction/grace state, grace remaining, next downtime and next availability. Settings and Exit require the protected password; status cannot mutate enforcement. | Architecture sections 8/11; owner reaffirmation |
+| D15 | Defer overall multi-app caps, forced breaks, passive unrelated-app tracking, TimeGuard import, deliberate clock-tamper defense and automatic crash watchdog/restart unless explicitly promoted. Broad history/dashboard redesign also remains optional. Essential restart/sleep/midnight reconciliation remains in scope. | Architecture MVP/sections 9–11; owner reaffirmation |
+| D16 | Branding/naming cleanup belongs to Phase 8. **Phase 8A is user-facing branding:** replace current app/tray/window branding with an hourglass icon, ultimately used consistently for the app icon, tray icon and window/taskbar branding. Use `ScreenTime` consistently in user-facing names, titles, tray text, notifications, settings, executable/product metadata and packaging where applicable. Remove remaining TimeGuard/parental-control-style user-facing wording where inconsistent with ScreenTime terminology. Keep this scoped to branding/naming cleanup, not a broad visual identity redesign. | Owner-approved Phase 8 clarification, 2026-09-24 |
+| D17 | **Phase 8B is optional internal technical cleanup:** project names, assemblies, namespaces, `TimeGuard.*` identifiers, folders/files and similar internal naming. Defer this noisier mass-renaming until functional phases are stable so rename noise does not obscure functional diffs. Phase 8A does not require Phase 8B. | Owner-approved Phase 8 clarification, 2026-09-24 |
+
+## Delivery decisions (2026-09-24)
+
+- Replace routine human handoffs with implement → test → push phase branch → PR into `screentime-dev` → independent Codex review → remediation/re-review → final validation → merge. GitHub is the shared review record; an implementer's report is never review proof.
+- Prefer repository Codex Code Review when enabled; otherwise use an independent reviewer context and a separate worktree pinned to the PR head. The initial reviewer does not modify production code. No custom orchestrator, API dependency or API key is needed.
+- Human input is reserved for genuine product conflicts/unknowns, approval-required destructive/security actions, unresolved architectural disagreement, unreliable required validation after diagnosis, or material scope expansion. See the protocol for details.
+- This one-time setup is local and awaiting owner approval before any push. It does not authorize Phase 5 implementation, merging prior phases, rewriting history, changing credentials or changing remote protections.
+- Repository access is confirmed through the GitHub connector, but Codex Code Review enablement is unverified. The protocol records evidence and fallback/setup steps rather than assuming installation means review is enabled.
+
+## Historical validation limits to preserve
+
+The Phase 4 report records 174 passing Core tests, four passing rebuilt helper scenarios and a passing real 20-minute helper check. It also records blocked interactive UI validation caused by denied desktop input; physical sleep/hibernate and real-calendar midnight were not claimed. These are historical observations, not permission to skip future gates or to overturn the owner's phase-completion statement. Each future PR must supply its own current validation evidence. Phase 5 Apex safety and Phase 6 tray acceptance remain future gates.

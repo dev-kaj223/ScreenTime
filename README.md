@@ -1,3 +1,5 @@
+> **ScreenTime development:** start with [AGENTS.md](AGENTS.md), [product requirements](docs/PRODUCT_REQUIREMENTS.md), and the [review protocol](docs/REVIEW_PROTOCOL.md). The TimeGuard README below is retained upstream history; its features, profile paths and download links do not define the current ScreenTime MVP.
+
 # 🛡️ TimeGuard
 
 > **Quietly protect your kids' screen time — without the arguments.**
