@@ -73,7 +73,9 @@ public class NotificationTests
     [Fact] public async Task ReceiptFailureAndSuppressedDelivery_CannotPreventGraceExpiryOrRelaunchDenial()
     {
         using var p = new TempProfile(); var db = new DatabaseService(p.Runtime.Paths); var clock = new TestClock();
-        using var c = Open(p);
+        db.TryRecordNotification(new("setup", "helper", "Helper", NotificationKind.QuotaTenMinutes,
+            clock.Now, clock.Now.AddSeconds(15), TimeSpan.FromMinutes(10)));
+        using var c = new SqliteConnection($"Data Source={p.Runtime.Paths.NotificationDatabasePath}"); c.Open();
         c.Execute("CREATE TRIGGER FailNotice BEFORE INSERT ON NotificationReceipts BEGIN SELECT RAISE(ABORT,'injected notice failure'); END");
         db.UpsertUsageEntry(Day, new() { ProcessName = "helper", QuotaSeconds = 659, ObservedSeconds = 659 });
         var terminator = new FakeTerminator();
