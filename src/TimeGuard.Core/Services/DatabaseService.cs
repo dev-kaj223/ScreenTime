@@ -18,6 +18,8 @@ public class DatabaseService : IStateStore
         var builder = connectionString is null
             ? new SqliteConnectionStringBuilder { DataSource = RuntimeOptions.Development().Paths.DatabasePath }
             : new SqliteConnectionStringBuilder(connectionString);
+        DatabaseMigrator.RejectLegacyPath(builder.DataSource);
+        builder.ForeignKeys = true;
         // Explicit connections have no dependency on a default profile directory.
         if (!string.IsNullOrEmpty(builder.DataSource) && builder.DataSource != ":memory:" &&
             builder.Mode != SqliteOpenMode.Memory)
@@ -109,6 +111,7 @@ public class DatabaseService : IStateStore
 
         foreach (var rule in rules)
         {
+            rule.BlockedPeriods = conn.Query<BlockedPeriod>("SELECT * FROM BlockedPeriods WHERE RuleId=@Id ORDER BY StartDayOfWeek,StartMinute", new { rule.Id }).ToList();
             if (scheduleLookup.TryGetValue(rule.Id, out var schedules))
                 rule.SetWeekSchedule(schedules);
             else
@@ -120,6 +123,10 @@ public class DatabaseService : IStateStore
 
     public void SaveRule(AppRule rule)
     {
+        foreach (var period in rule.BlockedPeriods) period.Validate();
+        if (rule.DailyLimitMinutes < 0 || rule.DaySchedules.Any(s => !Enum.IsDefined(s.DayOfWeek) || s.DailyLimitMinutes < 0) ||
+            rule.DaySchedules.Select(s => s.DayOfWeek).Distinct().Count() != rule.DaySchedules.Count)
+            throw new ArgumentException("Allowances must be non-negative and weekday rows must be unique and valid.");
         if (string.IsNullOrWhiteSpace(ProcessInstance.NormalizeKey(rule.ProcessName)))
             throw new ArgumentException("A process name is required.", nameof(rule));
         using var conn = Open();
@@ -192,6 +199,11 @@ public class DatabaseService : IStateStore
             }),
             tx);
 
+        conn.Execute("DELETE FROM BlockedPeriods WHERE RuleId=@Id", new { rule.Id }, tx);
+        conn.Execute("""
+            INSERT INTO BlockedPeriods(RuleId,StartDayOfWeek,StartMinute,EndMinute,EndDayOffset,Enabled)
+            VALUES(@RuleId,@StartDayOfWeek,@StartMinute,@EndMinute,@EndDayOffset,@Enabled)
+            """, rule.BlockedPeriods.Select(p => p with { RuleId = rule.Id }), tx);
         tx.Commit();
     }
 
@@ -214,7 +226,7 @@ public class DatabaseService : IStateStore
         var dateStr = date.ToString("yyyy-MM-dd");
 
         var entries = conn.Query<UsageEntry>("""
-            SELECT Id, ProcessName, UsageMins AS UsageMinutes,
+            SELECT Id, ProcessName, ObservedSeconds, QuotaSeconds,
                    Blocked, WarningSent
             FROM DailyUsage WHERE Date = @dateStr
             """, new { dateStr }).ToList();
@@ -236,11 +248,28 @@ public class DatabaseService : IStateStore
     public void UpsertUsageEntry(DateOnly date, UsageEntry entry)
     {
         using var conn = Open();
+        UpsertUsage(conn, null, date, entry);
+    }
+
+    public void SaveUsage(IEnumerable<DailyLog> logs)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        foreach (var log in logs)
+            foreach (var entry in log.Entries) UpsertUsage(conn, tx, log.Date, entry);
+        tx.Commit();
+    }
+
+    private static void UpsertUsage(SqliteConnection conn, SqliteTransaction? tx, DateOnly date, UsageEntry entry)
+    {
+        if (entry.ObservedSeconds < 0 || entry.QuotaSeconds < 0) throw new ArgumentException("Usage seconds must be non-negative.");
         conn.Execute("""
-            INSERT INTO DailyUsage(Date, ProcessName, UsageMins, Blocked, WarningSent)
-            VALUES(@date, @ProcessName, @UsageMinutes, @Blocked, @WarningSent)
+            INSERT INTO DailyUsage(Date, ProcessName, UsageMins, Blocked, WarningSent, ObservedSeconds, QuotaSeconds)
+            VALUES(@date, @ProcessName, @UsageMinutes, @Blocked, @WarningSent, @ObservedSeconds, @QuotaSeconds)
             ON CONFLICT(Date, ProcessName) DO UPDATE SET
                 UsageMins   = excluded.UsageMins,
+                ObservedSeconds = excluded.ObservedSeconds,
+                QuotaSeconds = excluded.QuotaSeconds,
                 Blocked     = excluded.Blocked,
                 WarningSent = excluded.WarningSent
             """, new
@@ -248,9 +277,11 @@ public class DatabaseService : IStateStore
             date = date.ToString("yyyy-MM-dd"),
             ProcessName = ProcessInstance.NormalizeKey(entry.ProcessName),
             entry.UsageMinutes,
+            entry.ObservedSeconds,
+            entry.QuotaSeconds,
             entry.Blocked,
             entry.WarningSent
-        });
+        }, tx);
     }
 
     // ── Sessions ──────────────────────────────────────────────────────────────

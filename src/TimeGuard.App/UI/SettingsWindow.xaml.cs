@@ -185,9 +185,16 @@ public partial class SettingsWindow : Window
 
     private void LoadUsage()
     {
-        var log = _db.LoadTodayLog();
+        var evaluator = new DowntimeEvaluator(TimeZoneInfo.Local);
+        var engine = new RulesEngine();
+        var now = DateTimeOffset.UtcNow;
+        var log = _db.LoadLog(evaluator.LocalDate(now));
+        var rules = _db.GetRules().ToDictionary(r => ProcessInstance.NormalizeKey(r.ProcessName));
         UsageGrid.ItemsSource = log.Entries
-            .Select(e => new UsageRow(e.ProcessName, $"{e.UsageMinutes:F1}", e.Blocked))
+            .Select(e => new UsageRow(e.ProcessName, $"{e.UsageMinutes:F1}",
+                rules.TryGetValue(ProcessInstance.NormalizeKey(e.ProcessName), out var rule) &&
+                !engine.Evaluate(PolicySnapshot.Capture(rule, log, now, false, evaluator,
+                    date => _db.LoadLog(date).Entries.FirstOrDefault(u => u.ProcessName == e.ProcessName)?.QuotaSeconds ?? 0)).MayLaunch))
             .ToList();
     }
 

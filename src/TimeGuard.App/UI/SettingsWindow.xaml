@@ -58,7 +58,7 @@
                                 <DataGridTextColumn      Header="App Name"    Binding="{Binding DisplayName}"          Width="*"/>
                                 <DataGridTextColumn      Header="Process"     Binding="{Binding ProcessName}"          Width="110"/>
                                 <DataGridTextColumn      Header="Limit Schedule" Binding="{Binding WeeklyLimitSummary}"  Width="170"/>
-                                <DataGridTextColumn      Header="Allowed Times"  Binding="{Binding WeeklyWindowSummary}" Width="200"/>
+                                <DataGridTextColumn      Header="Downtime"  Binding="{Binding WeeklyWindowSummary}" Width="200"/>
                                 <DataGridTextColumn      Header="Break every" Binding="{Binding BreakEveryMinutes}"    Width="80"/>
                                 <DataGridTextColumn      Header="Break dur."  Binding="{Binding BreakDurationMinutes}" Width="75"/>
                             </DataGrid.Columns>

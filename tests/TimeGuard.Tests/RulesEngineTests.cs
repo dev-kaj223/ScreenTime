@@ -34,12 +34,12 @@ public class RulesEngineTests
     }
     [Fact] public void Block_WhenOutsideTimeWindow()
     {
-        var rule = Rule(); rule.AllowedWindowStart = "17:00"; rule.AllowedWindowEnd = "20:00";
-        Assert.Equal(PolicyState.TemporaryScheduleRestriction, Evaluate(rule: rule).State);
+        var rule = Rule(); rule.BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 0, EndMinute = 17 * 60 }];
+        Assert.Equal(PolicyState.TemporaryDowntime, Evaluate(rule: rule).State);
     }
     [Fact] public void NoAction_WhenInsideTimeWindow()
     {
-        var rule = Rule(); rule.AllowedWindowStart = "15:00"; rule.AllowedWindowEnd = "20:00";
+        var rule = Rule(); rule.BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 0, EndMinute = 15 * 60 }, new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 20 * 60, EndMinute = 0, EndDayOffset = 1 }];
         Assert.True(Evaluate(rule: rule).MayLaunch);
     }
     [Fact] public void OverallCap_IsInactive()
@@ -76,8 +76,8 @@ public class RulesEngineTests
     [Fact] public void Block_WhenOutsideWeekdaySpecificWindow()
     {
         var rule = Rule();
-        rule.DaySchedules = [new() { DayOfWeek = DayOfWeek.Wednesday, AllowedWindowStart = "12:00", AllowedWindowEnd = "14:00" }];
-        Assert.Equal(PolicyState.TemporaryScheduleRestriction, Evaluate(rule: rule).State);
+        rule.BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 14 * 60, EndMinute = 17 * 60 }];
+        Assert.Equal(PolicyState.TemporaryDowntime, Evaluate(rule: rule).State);
     }
     [Fact] public void NoAction_WhenAnotherDayHasShorterLimit()
     {
@@ -106,20 +106,20 @@ public class RulesEngineTests
         Assert.False(decision.WarnFiveMinutes); Assert.False(decision.TerminationRequired);
     }
     [Theory]
-    [InlineData(15, 0)] [InlineData(20, 0)]
-    public void LegacyWindowEndpoints_RemainInclusive(int hour, int minute)
+    [InlineData(15, 0, true)] [InlineData(19, 59, true)] [InlineData(20, 0, false)]
+    public void DowntimeEndpoints_AreHalfOpen(int hour, int minute, bool permitted)
     {
-        var rule = Rule(); rule.AllowedWindowStart = "15:00"; rule.AllowedWindowEnd = "20:00";
-        Assert.True(_engine.Evaluate(PolicySnapshot.Capture(rule, Log(), new(hour, minute), true)).MayContinue);
+        var rule = Rule(); rule.BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 0, EndMinute = 15 * 60 }, new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 20 * 60, EndMinute = 0, EndDayOffset = 1 }];
+        Assert.Equal(permitted, _engine.Evaluate(PolicySnapshot.Capture(rule, Log(), new(hour, minute), true)).MayContinue);
     }
     [Fact] public void UnlimitedDay_RemainsUnlimited() => Assert.True(Evaluate(1000, rule: Rule(0)).MayContinue);
     [Fact] public void ScheduleAndQuotaReasons_AreBothRetained()
     {
-        var rule = Rule(); rule.AllowedWindowStart = "17:00"; rule.AllowedWindowEnd = "20:00";
+        var rule = Rule(); rule.BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 0, EndMinute = 17 * 60 }];
         var outside = PolicySnapshot.Capture(rule, Log(60), new(16, 0), true);
         var decision = _engine.Evaluate(outside);
-        Assert.Equal(PolicyReason.OutsideAllowedWindow | PolicyReason.DailyQuotaExhausted, decision.Reasons);
-        var inside = _engine.Evaluate(outside with { LocalTime = new(18, 0) });
+        Assert.Equal(PolicyReason.Downtime | PolicyReason.DailyQuotaExhausted, decision.Reasons);
+        var inside = _engine.Evaluate(PolicySnapshot.Capture(rule, Log(60), new(18, 0), true));
         Assert.Equal(PolicyState.DailyQuotaBlocked, inside.State);
         Assert.False(inside.MayLaunch);
     }

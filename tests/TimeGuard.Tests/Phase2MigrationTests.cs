@@ -24,7 +24,7 @@ public class Phase2MigrationTests
         db.SaveRule(new() { ProcessName = " HELPER.exe ", DisplayName = "Helper" });
         Assert.Equal("helper", Assert.Single(db.GetRules()).ProcessName);
         Assert.Throws<SqliteException>(() => db.SaveRule(new() { ProcessName = "Helper", DisplayName = "Duplicate" }));
-        Assert.Equal(1, Sql(profile, "PRAGMA user_version"));
+        Assert.Equal(2, Sql(profile, "PRAGMA user_version"));
         Assert.Single(new DatabaseService(profile.Runtime.Paths).GetRules());
         Assert.False(File.Exists(profile.Runtime.Paths.DatabasePath + ".pre-phase2.bak"));
     }
@@ -46,6 +46,9 @@ public class Phase2MigrationTests
         using var profile = new TempProfile();
         _ = new DatabaseService(profile.Runtime.Paths);
         Sql(profile, """
+            DROP TABLE BlockedPeriods;
+            ALTER TABLE DailyUsage DROP COLUMN ObservedSeconds;
+            ALTER TABLE DailyUsage DROP COLUMN QuotaSeconds;
             DROP INDEX idx_rules_appkey;
             DROP INDEX idx_usage_appkey_date;
             PRAGMA user_version=0;

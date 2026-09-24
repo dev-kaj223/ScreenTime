@@ -10,6 +10,12 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     private readonly IProcessMonitor _processes;
     private readonly EnforcementService _enforcement;
     private readonly TimeProvider _time;
+    private DowntimeEvaluator _downtime;
+    private UsageAccounting _accounting;
+    private readonly SemaphoreSlim _wake = new(0, 1);
+    private int _rebase;
+    private int _suspended;
+    private TimeSpan _nextWait = TimeSpan.FromSeconds(5);
     private readonly CancellationTokenSource _cts = new();
     private readonly object _lifecycleGate = new();
     private readonly SemaphoreSlim _tickGate = new(1, 1);
@@ -32,7 +38,6 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     public event Action<string, string>? BlockRequested;
     public event Action<string, string>? WarnRequested;
     private static readonly TimeSpan PollInterval = TimeSpan.FromSeconds(5);
-    private const double PollMinutes = 5.0 / 60.0;
 
     public MonitorService(IStateStore db, RulesEngine rules, AppConfig config, IAppLogger? logger = null,
         IProcessMonitor? processes = null, IProcessTerminator? terminator = null, TimeProvider? time = null)
@@ -43,6 +48,8 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         _processes = processes ?? new WindowsProcessMonitor(logger);
         _enforcement = new EnforcementService(terminator ?? new WindowsProcessTerminator(), logger);
         _time = time ?? TimeProvider.System;
+        _downtime = new DowntimeEvaluator(_time.LocalTimeZone);
+        _accounting = new UsageAccounting(_time, _downtime);
         _rulesConfig = CopyRules(config);
         StoppingToken = _cts.Token;
         _log = db.LoadLog(DateOnly.FromDateTime(_time.GetLocalNow().DateTime));
@@ -53,11 +60,13 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         var rules = config.Rules.Select(rule => new AppRule
         {
             ProcessName = ProcessInstance.NormalizeKey(rule.ProcessName), DisplayName = rule.DisplayName,
-            Enabled = rule.Enabled, DaySchedules = rule.GetWeekSchedule()
+            Id = rule.Id, Enabled = rule.Enabled, DaySchedules = rule.GetWeekSchedule(),
+            BlockedPeriods = rule.BlockedPeriods.Select(p => p with { }).ToList()
         }).ToArray();
         if (rules.Any(r => string.IsNullOrWhiteSpace(r.ProcessName)) ||
             rules.Select(r => r.ProcessName).Distinct().Count() != rules.Length)
             throw new ArgumentException("Each configured application must have one nonempty canonical process key.");
+        foreach (var period in rules.SelectMany(r => r.BlockedPeriods)) period.Validate();
         return rules;
     }
 
@@ -135,14 +144,24 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     }
 
     // UI callers only publish a private copy; no usage/session state is touched here.
-    public void ReloadConfig(AppConfig config) => Interlocked.Exchange(ref _pendingConfig, CopyRules(config));
+    public void ReloadConfig(AppConfig config)
+    {
+        Interlocked.Exchange(ref _pendingConfig, CopyRules(config));
+        Wake();
+    }
+
+    // Power callbacks publish signals only; the coordinator owns all accounting state.
+    public void NotifySuspend() { Interlocked.Exchange(ref _suspended, 1); Interlocked.Exchange(ref _rebase, 1); Wake(); }
+    public void NotifyResume() { Interlocked.Exchange(ref _rebase, 1); Interlocked.Exchange(ref _suspended, 0); Wake(); }
+    public void NotifyTimeChanged() { Interlocked.Exchange(ref _rebase, 1); Wake(); }
+    private void Wake() { if (_wake.CurrentCount == 0) { try { _wake.Release(); } catch (SemaphoreFullException) { } } }
 
     private async Task RunLoop(CancellationToken ct)
     {
         while (!ct.IsCancellationRequested)
         {
             await TickAsync(ct).ConfigureAwait(false);
-            await Task.Delay(PollInterval, ct).ConfigureAwait(false);
+            await _wake.WaitAsync(_nextWait, ct).ConfigureAwait(false);
         }
     }
 
@@ -152,19 +171,38 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         await _tickGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            var now = _time.GetLocalNow().DateTime;
-            var today = DateOnly.FromDateTime(now);
-            if (today != _log.Date)
+            if (!_downtime.Zone.HasSameRules(_time.LocalTimeZone) || _downtime.Zone.Id != _time.LocalTimeZone.Id)
             {
-                CloseAllSessions();
-                _log = _db.LoadLog(today);
+                _downtime = new DowntimeEvaluator(_time.LocalTimeZone);
+                _accounting = new UsageAccounting(_time, _downtime);
             }
             var pending = Interlocked.Exchange(ref _pendingConfig, null);
-            if (pending is not null) _rulesConfig = pending;
+            if (pending is not null) { _rulesConfig = pending; _accounting.Reset(); }
             var configured = _rulesConfig.Where(r => r.Enabled).ToArray();
             var keys = configured.Select(r => r.ProcessName).ToHashSet(StringComparer.Ordinal);
             var instances = _processes.Snapshot(keys).Where(p => keys.Contains(p.AppKey)).Distinct().ToArray();
             var running = instances.Select(p => p.AppKey).ToHashSet(StringComparer.Ordinal);
+            var now = _time.GetUtcNow();
+            var observationTimestamp = _time.GetTimestamp();
+            var today = _downtime.LocalDate(now);
+            if (Interlocked.Exchange(ref _rebase, 0) != 0) _accounting.Reset();
+            if (Volatile.Read(ref _suspended) != 0) { _accounting.Reset(); _nextWait = PollInterval; return; }
+            var logs = new Dictionary<DateOnly, DailyLog> { [_log.Date] = _log };
+            DailyLog GetLog(DateOnly date)
+            {
+                if (!logs.TryGetValue(date, out var log)) logs[date] = log = _db.LoadLog(date);
+                return log;
+            }
+            if (today != _log.Date)
+            {
+                CloseAllSessions();
+                _log = GetLog(today);
+            }
+            _accounting.Observe(now, instances, configured, GetLog, observationTimestamp);
+            // Materialize today's zero bucket even when downtime denies the first launch.
+            foreach (var rule in configured) _log.GetOrCreate(rule.ProcessName);
+            _db.SaveUsage(logs.Values.Select(log => new DailyLog
+            { Date = log.Date, Entries = log.Entries.Where(e => keys.Contains(e.ProcessName)).ToList() }));
             foreach (var name in _sessions.Keys.Where(n => !running.Contains(n)).ToArray()) CloseSession(name);
             foreach (var name in running)
                 if (!_sessions.ContainsKey(name)) _sessions[name] = _db.OpenSession(name);
@@ -172,7 +210,8 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
             var decisions = new List<PolicyDecision>();
             foreach (var rule in _rulesConfig)
             {
-                var snapshot = PolicySnapshot.Capture(rule, _log, TimeOnly.FromDateTime(now), running.Contains(rule.ProcessName));
+                var snapshot = PolicySnapshot.Capture(rule, _log, now, running.Contains(rule.ProcessName), _downtime,
+                    date => GetLog(date).Entries.FirstOrDefault(e => e.ProcessName == rule.ProcessName)?.QuotaSeconds ?? 0);
                 if (pending is not null && (snapshot.DailyLimitMinutes == 0 || snapshot.DailyLimitMinutes - snapshot.UsageMinutes > 5))
                 {
                     var existing = _log.Entries.FirstOrDefault(e => e.ProcessName == rule.ProcessName);
@@ -184,16 +223,6 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                     }
                 }
                 var decision = _rules.Evaluate(snapshot);
-                if (rule.Enabled && snapshot.IsRunning && decision.MayContinue)
-                {
-                    // Preserve minute storage and five-second sampling for Phase 2. Denied
-                    // launches are evaluated first and cannot spend the next permitted quota.
-                    var entry = _log.GetOrCreate(rule.ProcessName);
-                    entry.UsageMinutes += PollMinutes;
-                    _db.UpsertUsageEntry(today, entry);
-                    snapshot = snapshot with { UsageMinutes = entry.UsageMinutes };
-                    decision = _rules.Evaluate(snapshot);
-                }
                 if (decision.WarnFiveMinutes)
                 {
                     var entry = _log.GetOrCreate(rule.ProcessName);
@@ -208,6 +237,21 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 foreach (var instance in instances.Where(p => p.AppKey == decision.AppKey))
                     results.Add(await _enforcement.EnforceAsync(decision, instance, ct).ConfigureAwait(false));
             Volatile.Write(ref _enforcementResults, results.AsReadOnly());
+            foreach (var result in results.Where(r => r.Outcome is TerminationOutcome.Terminated or TerminationOutcome.AlreadyExited))
+                _accounting.Forget(result.Target);
+            var next = _downtime.MidnightAfter(now);
+            foreach (var decision in decisions)
+            {
+                foreach (var boundary in new[] { decision.DowntimeEnd, decision.NextDowntimeStart })
+                    if (boundary > now && boundary < next) next = boundary.Value;
+                var rule = configured.FirstOrDefault(r => r.ProcessName == decision.AppKey);
+                if (rule is null || !decision.MayContinue || !running.Contains(rule.ProcessName)) continue;
+                var limit = rule.GetScheduleForDay(today.DayOfWeek).DailyLimitMinutes * 60L;
+                var remaining = limit - _log.GetOrCreate(rule.ProcessName).QuotaSeconds;
+                if (limit > 0 && remaining > 0 && now.AddSeconds(remaining) < next) next = now.AddSeconds(remaining);
+            }
+            var delay = next - _time.GetUtcNow();
+            _nextWait = delay < TimeSpan.FromMilliseconds(100) ? TimeSpan.FromMilliseconds(100) : delay < PollInterval ? delay : PollInterval;
             // All targets are enforced before any UI subscriber is invoked. WPF enqueues
             // asynchronously; subscriber exceptions are diagnostics, never worker failures.
             foreach (var decision in decisions)

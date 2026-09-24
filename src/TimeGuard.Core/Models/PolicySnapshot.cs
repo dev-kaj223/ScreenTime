@@ -1,22 +1,28 @@
+using TimeGuard.Services;
+
 namespace TimeGuard.Models;
 
-/// <summary>Copied scalar facts. No mutable config, log, process handle, or UI references.</summary>
+/// <summary>Immutable policy facts. Downtime and quota can be true simultaneously.</summary>
 public sealed record PolicySnapshot(
-    string AppKey, string DisplayName, bool Enabled, DateOnly Date, TimeOnly LocalTime,
-    int DailyLimitMinutes, TimeOnly? AllowedWindowStart, TimeOnly? AllowedWindowEnd,
-    double UsageMinutes, bool WarningSent, bool IsRunning)
+    string AppKey, string DisplayName, bool Enabled, DateOnly Date,
+    int DailyLimitMinutes, long QuotaSeconds, bool WarningSent, bool IsRunning,
+    DowntimeFacts Downtime, DateTimeOffset? NextAvailability)
 {
-    // Temporary adapter for the existing inclusive, same-day allowed-window model.
-    // Blocked and overall/break state deliberately never cross this boundary.
-    public static PolicySnapshot Capture(AppRule rule, DailyLog log, TimeOnly now, bool isRunning)
+    public double UsageMinutes => QuotaSeconds / 60.0;
+
+    public static PolicySnapshot Capture(AppRule rule, DailyLog log, TimeOnly now, bool isRunning) =>
+        Capture(rule, log, new DateTimeOffset(log.Date.ToDateTime(now), TimeSpan.Zero), isRunning,
+            new DowntimeEvaluator(TimeZoneInfo.Utc), date => date == log.Date
+                ? log.Entries.FirstOrDefault(e => ProcessInstance.NormalizeKey(e.ProcessName) == ProcessInstance.NormalizeKey(rule.ProcessName))?.QuotaSeconds ?? 0 : 0);
+
+    public static PolicySnapshot Capture(AppRule rule, DailyLog log, DateTimeOffset now, bool isRunning,
+        DowntimeEvaluator evaluator, Func<DateOnly, long> quota)
     {
         var key = ProcessInstance.NormalizeKey(rule.ProcessName);
-        var schedule = rule.GetScheduleForDay(log.Date.DayOfWeek);
         var usage = log.Entries.FirstOrDefault(e => ProcessInstance.NormalizeKey(e.ProcessName) == key);
-        return new(key, rule.DisplayName, rule.Enabled, log.Date, now,
-            schedule.DailyLimitMinutes,
-            schedule.HasTimeWindow ? TimeOnly.Parse(schedule.AllowedWindowStart!) : null,
-            schedule.HasTimeWindow ? TimeOnly.Parse(schedule.AllowedWindowEnd!) : null,
-            usage?.UsageMinutes ?? 0, usage?.WarningSent ?? false, isRunning);
+        return new(key, rule.DisplayName, rule.Enabled, log.Date,
+            rule.GetScheduleForDay(log.Date.DayOfWeek).DailyLimitMinutes,
+            usage?.QuotaSeconds ?? 0, usage?.WarningSent ?? false, isRunning,
+            evaluator.Evaluate(rule.BlockedPeriods, now), rule.Enabled ? evaluator.NextAvailability(rule, now, quota) : now);
     }
 }

@@ -2,28 +2,27 @@ using TimeGuard.Models;
 
 namespace TimeGuard.Services;
 
-/// <summary>Pure Phase 2 policy. Persistence, processes and WPF are not dependencies.</summary>
+/// <summary>Pure Phase 3 policy. Persistence, processes and WPF are not dependencies.</summary>
 public sealed class RulesEngine
 {
     public PolicyDecision Evaluate(PolicySnapshot snapshot)
     {
-        var scheduleRestricted = snapshot.Enabled &&
-            snapshot.AllowedWindowStart is { } start && snapshot.AllowedWindowEnd is { } end &&
-            (snapshot.LocalTime < start || snapshot.LocalTime > end);
+        var scheduleRestricted = snapshot.Enabled && snapshot.Downtime.IsActive;
         var quotaExhausted = snapshot.Enabled && snapshot.DailyLimitMinutes > 0 &&
-            snapshot.UsageMinutes >= snapshot.DailyLimitMinutes;
-        var reasons = (scheduleRestricted ? PolicyReason.OutsideAllowedWindow : PolicyReason.None) |
+            snapshot.QuotaSeconds >= snapshot.DailyLimitMinutes * 60L;
+        var reasons = (scheduleRestricted ? PolicyReason.Downtime : PolicyReason.None) |
             (quotaExhausted ? PolicyReason.DailyQuotaExhausted : PolicyReason.None);
         var permitted = reasons == PolicyReason.None;
         var warning = snapshot.Enabled && permitted && snapshot.DailyLimitMinutes > 0 &&
             snapshot.DailyLimitMinutes - snapshot.UsageMinutes <= 5;
         return new(snapshot.AppKey, snapshot.DisplayName,
-            scheduleRestricted ? PolicyState.TemporaryScheduleRestriction :
+            scheduleRestricted ? PolicyState.TemporaryDowntime :
             quotaExhausted ? PolicyState.DailyQuotaBlocked :
             warning ? PolicyState.Warning : PolicyState.Available,
-            scheduleRestricted ? PolicyReason.OutsideAllowedWindow :
+            scheduleRestricted ? PolicyReason.Downtime :
             quotaExhausted ? PolicyReason.DailyQuotaExhausted : PolicyReason.None,
             reasons, permitted, permitted, !permitted && snapshot.IsRunning,
-            warning && snapshot.IsRunning && !snapshot.WarningSent);
+            warning && snapshot.IsRunning && !snapshot.WarningSent,
+            snapshot.Downtime.CurrentEnd, snapshot.Downtime.NextStart, snapshot.NextAvailability);
     }
 }

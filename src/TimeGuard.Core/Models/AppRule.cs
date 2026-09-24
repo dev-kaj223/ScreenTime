@@ -36,6 +36,7 @@ public class AppRule
     public string? AllowedWindowEnd { get; set; }
 
     public List<AppRuleDaySchedule> DaySchedules { get; set; } = [];
+    public List<BlockedPeriod> BlockedPeriods { get; set; } = [];
 
     /// <summary>Take a break every N minutes of play. 0 = no breaks.</summary>
     public int BreakEveryMinutes { get; set; } = 0;
@@ -71,24 +72,7 @@ public class AppRule
         }
     }
 
-    public string WeeklyWindowSummary
-    {
-        get
-        {
-            var schedules = GetWeekSchedule();
-            if (TryGetUniformSchedule(out var uniform))
-                return uniform.HasTimeWindow
-                    ? $"{uniform.AllowedWindowStart}-{uniform.AllowedWindowEnd} daily"
-                    : "Any time";
-
-            var windows = schedules
-                .Where(s => s.HasTimeWindow)
-                .Select(s => $"{AbbreviateDay(s.DayOfWeek)} {s.AllowedWindowStart}-{s.AllowedWindowEnd}")
-                .ToList();
-
-            return windows.Count > 0 ? string.Join(", ", windows) : "Any time";
-        }
-    }
+    public string WeeklyWindowSummary => BlockedPeriods.Any(p => p.Enabled) ? string.Join(", ", BlockedPeriods.Where(p => p.Enabled)) : "No downtime";
 
     /// <summary>Returns true if the current time falls inside the allowed window.</summary>
     public bool IsWithinAllowedWindow(TimeOnly now)

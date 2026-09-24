@@ -10,6 +10,7 @@ public partial class App : WpfApplication
 {
     private DatabaseService? _db;
     private MonitorService? _monitor;
+    private PowerSessionHelper? _power;
     private GlobalHotkeyHelper? _hotkey;
     private Window? _helperWindow;
     private Mutex? _singleInstanceMutex;
@@ -56,6 +57,7 @@ public partial class App : WpfApplication
             _monitor.BlockRequested += OnBlockRequested;
             _monitor.WarnRequested += OnWarnRequested;
 
+            _power = new PowerSessionHelper(_monitor);
             _monitor.Start();
             ObserveMonitorAsync();
 
@@ -110,6 +112,7 @@ public partial class App : WpfApplication
         if (_stopping) return;
         _stopping = true;
         _testCommands?.Stop();
+        _power?.Dispose();
         _monitor?.Dispose();
         if (_monitor is not null)
         {
@@ -147,6 +150,7 @@ public partial class App : WpfApplication
 
     protected override void OnExit(ExitEventArgs e)
     {
+        _power?.Dispose();
         _stopping = true;
         _testCommands?.Stop();
         // Shutdown can also originate from WPF/session exit. Enforcement never waits

@@ -28,7 +28,7 @@ public class EnforcementServiceTests
         var other = new Target { Identity = new("helper", 43, 100, 1) };
         var terminator = new WindowsProcessTerminator(id => { Assert.Equal(42, id); return target; }, 1);
         var service = new EnforcementService(terminator);
-        var decision = new RulesEngine().Evaluate(new("helper", "Helper", true, new(2026, 9, 23), new(10, 0), 1, null, null, 2, false, true));
+        var decision = new RulesEngine().Evaluate(new("helper", "Helper", true, new(2026, 9, 23), 1, 120, false, true, new(false, null, null), null));
         Assert.Equal(TerminationOutcome.Terminated, (await service.EnforceAsync(decision, Instance)).Outcome);
         Assert.Equal(1, target.Kills);
         Assert.Equal(0, other.Kills);
@@ -86,7 +86,7 @@ public class EnforcementServiceTests
     {
         var fake = new FakeTerminator();
         var service = new EnforcementService(fake);
-        var allowed = new RulesEngine().Evaluate(new("helper", "Helper", true, new(2026, 9, 23), new(10, 0), 60, null, null, 0, false, true));
+        var allowed = new RulesEngine().Evaluate(new("helper", "Helper", true, new(2026, 9, 23), 60, 0, false, true, new(false, null, null), null));
         Assert.Equal(TerminationOutcome.NotRequested, (await service.EnforceAsync(allowed, Instance)).Outcome);
         Assert.Equal(TerminationOutcome.NotRequested,
             (await service.EnforceAsync(allowed with { MayContinue = false, TerminationRequired = true, AppKey = "other" }, Instance)).Outcome);

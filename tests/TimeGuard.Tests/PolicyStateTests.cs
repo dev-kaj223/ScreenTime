@@ -15,13 +15,13 @@ public class PolicyStateTests
         var day = new DateOnly(2026, 9, 23);
         db.UpsertUsageEntry(day, new() { ProcessName = "helper", UsageMinutes = used });
         var rule = new AppRule { ProcessName = "helper", DailyLimitMinutes = 60,
-            AllowedWindowStart = "15:00", AllowedWindowEnd = "20:00" };
+            BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 0, EndMinute = 15 * 60 }] };
         var clock = new TestClock();
         var terminator = new FakeTerminator();
         await using var monitor = new MonitorService(db, new(), new() { Rules = [rule] },
             processes: new FakeProcesses(() => [new("helper", 1, 12345, 1)]), terminator: terminator, time: clock);
         await monitor.TickAsync();
-        Assert.Equal(PolicyState.TemporaryScheduleRestriction, Assert.Single(monitor.Decisions).State);
+        Assert.Equal(PolicyState.TemporaryDowntime, Assert.Single(monitor.Decisions).State);
         Assert.Single(terminator.Targets);
         var deniedUsage = Assert.Single(db.LoadLog(day).Entries);
         Assert.False(deniedUsage.Blocked);
@@ -44,11 +44,15 @@ public class PolicyStateTests
         var day = new DateOnly(2026, 9, 23);
         db.UpsertUsageEntry(day, new() { ProcessName = "helper", UsageMinutes = 10 });
         var terminator = new FakeTerminator();
+        var clock = new TestClock();
         await using var monitor = new MonitorService(db, new(), config,
             processes: new FakeProcesses(() => [new("helper", 1, 1, 1), new("helper", 2, 2, 1), new("unrelated", 3, 3, 1)]),
-            terminator: terminator, time: new TestClock());
+            terminator: terminator, time: clock);
         await monitor.TickAsync();
-        Assert.Equal(10 + 5.0 / 60, Assert.Single(db.LoadLog(day).Entries).UsageMinutes);
+        Assert.Equal(10, Assert.Single(db.LoadLog(day).Entries).UsageMinutes);
+        clock.Now = clock.Now.AddSeconds(7);
+        await monitor.TickAsync();
+        Assert.Equal(10 + 7.0 / 60, Assert.Single(db.LoadLog(day).Entries).UsageMinutes);
         Assert.Empty(terminator.Targets);
         // Session timestamps still use the existing wall clock in this phase.
         Assert.Equal("helper", Assert.Single(db.LoadSessionsForDay(DateOnly.FromDateTime(DateTime.Today))).ProcessName);
@@ -68,7 +72,7 @@ public class PolicyStateTests
         var db = new DatabaseService(profile.Runtime.Paths);
         var logger = new Logger();
         var terminator = new FakeTerminator { Outcome = outcome };
-        var rule = new AppRule { ProcessName = "helper", AllowedWindowStart = "15:00", AllowedWindowEnd = "20:00" };
+        var rule = new AppRule { ProcessName = "helper", BlockedPeriods = [new() { StartDayOfWeek = DayOfWeek.Wednesday, StartMinute = 0, EndMinute = 15 * 60 }] };
         await using var monitor = new MonitorService(db, new(), new() { Rules = [rule] }, logger,
             new FakeProcesses(() => [new("helper", 1, 1, 1), new("helper", 2, 2, 1)]), terminator, new TestClock());
         var notifications = 0;

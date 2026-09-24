@@ -7,6 +7,7 @@ public interface IStateStore
 {
     DailyLog LoadLog(DateOnly date);
     void UpsertUsageEntry(DateOnly date, UsageEntry entry);
+    void SaveUsage(IEnumerable<DailyLog> logs);
     int OpenSession(string processName, string windowTitle = "", bool isPassive = false);
     void CloseSession(int sessionId, double timeSinceBreakMins = 0);
 }

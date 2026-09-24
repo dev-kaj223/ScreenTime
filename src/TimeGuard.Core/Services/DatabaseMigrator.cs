@@ -1,4 +1,7 @@
 using Microsoft.Data.Sqlite;
+using Dapper;
+using System.Globalization;
+using TimeGuard.Models;
 
 namespace TimeGuard.Services;
 
@@ -12,37 +15,52 @@ public class DatabaseMigrator
 
     public DatabaseMigrator(string connectionString)
     {
+        RejectLegacyPath(new SqliteConnectionStringBuilder(connectionString).DataSource);
         _connectionString = connectionString;
+    }
+
+    internal static void RejectLegacyPath(string path)
+    {
+        if (string.IsNullOrEmpty(path) || path == ":memory:") return;
+        var legacy = Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TimeGuard");
+        var full = Path.GetFullPath(path);
+        if (full.StartsWith(legacy + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+            throw new InvalidOperationException("ScreenTime schema upgrades cannot open the installed TimeGuard profile.");
     }
 
     public void Migrate()
     {
         using var conn = new SqliteConnection(_connectionString);
         conn.Open();
+        Execute(conn, "PRAGMA foreign_keys=ON;");
 
         using var versionCommand = conn.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(versionCommand.ExecuteScalar());
-        if (version > 1) throw new InvalidOperationException($"Unsupported database schema version {version}.");
-        if (version == 1) return;
+        if (version > 2) throw new InvalidOperationException($"Unsupported database schema version {version}.");
+        if (version == 2) return;
         // Preserve a consistent pre-upgrade copy of existing ScreenTime profile data.
         using var tablesCommand = conn.CreateCommand();
         tablesCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppRules'";
         if (Convert.ToInt32(tablesCommand.ExecuteScalar()) > 0 && conn.DataSource != ":memory:")
         {
-            var backupPath = conn.DataSource + ".pre-phase2.bak";
-            if (!File.Exists(backupPath))
+            foreach (var suffix in version == 0 ? new[] { ".pre-phase2.bak", ".pre-phase3.bak" } : new[] { ".pre-phase3.bak" })
             {
-                using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath }.ToString());
-                backup.Open();
-                conn.BackupDatabase(backup);
+                var backupPath = conn.DataSource + suffix;
+                if (!File.Exists(backupPath))
+                {
+                    using var backup = new SqliteConnection(new SqliteConnectionStringBuilder { DataSource = backupPath }.ToString());
+                    backup.Open();
+                    conn.BackupDatabase(backup);
+                }
             }
         }
 
         // Enable WAL mode for better concurrent read performance
         Execute(conn, "PRAGMA journal_mode=WAL;");
         using var tx = conn.BeginTransaction();
-
+        if (version == 0)
+        {
         Execute(conn, tx, """
             CREATE TABLE IF NOT EXISTS Settings (
                 Key   TEXT PRIMARY KEY,
@@ -131,7 +149,56 @@ public class DatabaseMigrator
             CREATE UNIQUE INDEX idx_usage_appkey_date ON DailyUsage(Date, ProcessName COLLATE NOCASE);
             PRAGMA user_version=1;
             """);
+        }
+        ApplyPhase3(conn, tx);
         tx.Commit();
+    }
+
+    private static void ApplyPhase3(SqliteConnection conn, SqliteTransaction tx)
+    {
+        Execute(conn, tx, """
+            CREATE TABLE BlockedPeriods (
+                Id INTEGER PRIMARY KEY AUTOINCREMENT,
+                RuleId INTEGER NOT NULL REFERENCES AppRules(Id) ON DELETE CASCADE,
+                StartDayOfWeek INTEGER NOT NULL CHECK(typeof(StartDayOfWeek)='integer' AND StartDayOfWeek BETWEEN 0 AND 6),
+                StartMinute INTEGER NOT NULL CHECK(typeof(StartMinute)='integer' AND StartMinute BETWEEN 0 AND 1439),
+                EndMinute INTEGER NOT NULL CHECK(typeof(EndMinute)='integer' AND EndMinute BETWEEN 0 AND 1439),
+                EndDayOffset INTEGER NOT NULL CHECK(typeof(EndDayOffset)='integer' AND EndDayOffset IN (0,1)),
+                Enabled INTEGER NOT NULL DEFAULT 1 CHECK(typeof(Enabled)='integer' AND Enabled IN (0,1)),
+                CHECK(typeof(EndDayOffset)='integer' AND EndDayOffset * 1440 + EndMinute - StartMinute BETWEEN 1 AND 1440)
+            );
+            CREATE INDEX idx_blockedperiods_rule_day ON BlockedPeriods(RuleId, StartDayOfWeek);
+            ALTER TABLE DailyUsage ADD COLUMN ObservedSeconds INTEGER NOT NULL DEFAULT 0 CHECK(typeof(ObservedSeconds)='integer' AND ObservedSeconds >= 0);
+            ALTER TABLE DailyUsage ADD COLUMN QuotaSeconds INTEGER NOT NULL DEFAULT 0 CHECK(typeof(QuotaSeconds)='integer' AND QuotaSeconds >= 0);
+            UPDATE DailyUsage SET ObservedSeconds=CAST(round(max(0,UsageMins)*60) AS INTEGER),
+                QuotaSeconds=CAST(round(max(0,UsageMins)*60) AS INTEGER);
+            """);
+        var rows = conn.Query<(int RuleId, int Day, string? Start, string? End)>(
+            "SELECT RuleId, DayOfWeek, WindowStart, WindowEnd FROM AppRuleDaySchedules", transaction: tx).ToArray();
+        foreach (var row in rows)
+        {
+            if (row.Start is null && row.End is null) continue;
+            if (!TimeOnly.TryParseExact(row.Start, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
+                !TimeOnly.TryParseExact(row.End, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end) || start > end)
+                throw new InvalidOperationException($"Rule {row.RuleId}, day {row.Day}: invalid legacy allowed window; migration rolled back.");
+            // Legacy end was inclusive at an instant. Round outward to include its
+            // entire final minute; this adds less than 60 seconds of availability.
+            var first = start.Hour * 60 + start.Minute;
+            var after = end.Hour * 60 + end.Minute + 1;
+            void Insert(int begin, int finish, int offset)
+            {
+                var period = new BlockedPeriod { RuleId = row.RuleId, StartDayOfWeek = (DayOfWeek)row.Day,
+                    StartMinute = begin, EndMinute = finish, EndDayOffset = offset };
+                period.Validate();
+                conn.Execute("""
+                    INSERT INTO BlockedPeriods(RuleId,StartDayOfWeek,StartMinute,EndMinute,EndDayOffset,Enabled)
+                    VALUES(@RuleId,@StartDayOfWeek,@StartMinute,@EndMinute,@EndDayOffset,@Enabled)
+                    """, period, tx);
+            }
+            if (first > 0) Insert(0, first, 0);
+            if (after < 1440) Insert(after, 0, 1);
+        }
+        Execute(conn, tx, "PRAGMA user_version=2;");
     }
     private static void Execute(SqliteConnection conn, string sql) => Execute(conn, null, sql);
 

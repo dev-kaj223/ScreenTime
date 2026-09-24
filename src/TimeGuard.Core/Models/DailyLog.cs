@@ -26,7 +26,13 @@ public class UsageEntry
     public string ProcessName { get; set; } = string.Empty;
 
     /// <summary>Accumulated usage in minutes (sum of all sessions).</summary>
-    public double UsageMinutes { get; set; } = 0;
+    public double UsageMinutes
+    {
+        get => QuotaSeconds / 60.0;
+        set => QuotaSeconds = checked((long)Math.Round(value * 60, MidpointRounding.AwayFromZero));
+    }
+    public long ObservedSeconds { get; set; }
+    public long QuotaSeconds { get; set; }
 
     /// <summary>Legacy readable column. Phase 2 policy derives permission from usage and schedule, never this flag.</summary>
     public bool Blocked { get; set; } = false;

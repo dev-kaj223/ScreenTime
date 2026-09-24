@@ -12,9 +12,7 @@ public partial class RuleEditWindow : Window
     private sealed record WeekdayEditor(
         DayOfWeek DayOfWeek,
         string Name,
-        WpfTextBox LimitBox,
-        WpfTextBox StartBox,
-        WpfTextBox EndBox);
+        WpfTextBox LimitBox);
 
     public AppRule? Result { get; private set; }
 
@@ -23,6 +21,9 @@ public partial class RuleEditWindow : Window
         InitializeComponent();
 
         _enabled              = existing.Enabled;
+        PeriodDayBox.ItemsSource = Enum.GetValues<DayOfWeek>();
+        PeriodDayBox.SelectedItem = DayOfWeek.Monday;
+        foreach (var period in existing.BlockedPeriods) PeriodsList.Items.Add(period);
         DisplayNameBox.Text   = existing.DisplayName;
         ProcessNameBox.Text   = existing.ProcessName;
         BreakEveryBox.Text    = existing.BreakEveryMinutes.ToString();
@@ -32,8 +33,6 @@ public partial class RuleEditWindow : Window
         {
             var editor = GetWeekdayEditors().First(x => x.DayOfWeek == schedule.DayOfWeek);
             editor.LimitBox.Text = schedule.DailyLimitMinutes.ToString();
-            editor.StartBox.Text = schedule.AllowedWindowStart ?? string.Empty;
-            editor.EndBox.Text   = schedule.AllowedWindowEnd ?? string.Empty;
         }
     }
 
@@ -67,28 +66,10 @@ public partial class RuleEditWindow : Window
                 return;
             }
 
-            var start = editor.StartBox.Text.Trim();
-            var end   = editor.EndBox.Text.Trim();
-
-            if ((start.Length > 0) != (end.Length > 0))
-            {
-                ShowError($"{editor.Name}: provide both From and Until times, or leave both empty.");
-                return;
-            }
-
-            if (!TryNormalizeTime(start, out var normalizedStart) ||
-                !TryNormalizeTime(end, out var normalizedEnd))
-            {
-                ShowError($"{editor.Name}: time format must be HH:mm (e.g. 15:00).");
-                return;
-            }
-
             schedules.Add(new AppRuleDaySchedule
             {
                 DayOfWeek          = editor.DayOfWeek,
-                DailyLimitMinutes  = limit,
-                AllowedWindowStart = normalizedStart,
-                AllowedWindowEnd   = normalizedEnd
+                DailyLimitMinutes  = limit
             });
         }
 
@@ -120,6 +101,7 @@ public partial class RuleEditWindow : Window
             Enabled              = _enabled
         };
         rule.SetWeekSchedule(schedules);
+        rule.BlockedPeriods = PeriodsList.Items.Cast<BlockedPeriod>().ToList();
 
         Result       = rule;
         DialogResult = true;
@@ -128,26 +110,32 @@ public partial class RuleEditWindow : Window
 
     private IEnumerable<WeekdayEditor> GetWeekdayEditors()
     {
-        yield return new WeekdayEditor(DayOfWeek.Monday, "Monday", MondayLimitBox, MondayWindowStartBox, MondayWindowEndBox);
-        yield return new WeekdayEditor(DayOfWeek.Tuesday, "Tuesday", TuesdayLimitBox, TuesdayWindowStartBox, TuesdayWindowEndBox);
-        yield return new WeekdayEditor(DayOfWeek.Wednesday, "Wednesday", WednesdayLimitBox, WednesdayWindowStartBox, WednesdayWindowEndBox);
-        yield return new WeekdayEditor(DayOfWeek.Thursday, "Thursday", ThursdayLimitBox, ThursdayWindowStartBox, ThursdayWindowEndBox);
-        yield return new WeekdayEditor(DayOfWeek.Friday, "Friday", FridayLimitBox, FridayWindowStartBox, FridayWindowEndBox);
-        yield return new WeekdayEditor(DayOfWeek.Saturday, "Saturday", SaturdayLimitBox, SaturdayWindowStartBox, SaturdayWindowEndBox);
-        yield return new WeekdayEditor(DayOfWeek.Sunday, "Sunday", SundayLimitBox, SundayWindowStartBox, SundayWindowEndBox);
+        yield return new WeekdayEditor(DayOfWeek.Monday, "Monday", MondayLimitBox);
+        yield return new WeekdayEditor(DayOfWeek.Tuesday, "Tuesday", TuesdayLimitBox);
+        yield return new WeekdayEditor(DayOfWeek.Wednesday, "Wednesday", WednesdayLimitBox);
+        yield return new WeekdayEditor(DayOfWeek.Thursday, "Thursday", ThursdayLimitBox);
+        yield return new WeekdayEditor(DayOfWeek.Friday, "Friday", FridayLimitBox);
+        yield return new WeekdayEditor(DayOfWeek.Saturday, "Saturday", SaturdayLimitBox);
+        yield return new WeekdayEditor(DayOfWeek.Sunday, "Sunday", SundayLimitBox);
     }
 
-    private static bool TryNormalizeTime(string input, out string? normalized)
+    private void OnAddPeriod(object sender, RoutedEventArgs e)
     {
-        normalized = null;
-        if (string.IsNullOrWhiteSpace(input))
-            return true;
+        if (!TimeOnly.TryParseExact(PeriodStartBox.Text, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var start) ||
+            !TimeOnly.TryParseExact(PeriodEndBox.Text, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var end))
+        { ShowError("Downtime times must use HH:mm (e.g. 22:00)."); return; }
+        var period = new BlockedPeriod { StartDayOfWeek = (DayOfWeek)PeriodDayBox.SelectedItem,
+            StartMinute = start.Hour * 60 + start.Minute, EndMinute = end.Hour * 60 + end.Minute,
+            EndDayOffset = PeriodNextDayBox.IsChecked == true ? 1 : 0 };
+        try { period.Validate(); }
+        catch (ArgumentException ex) { ShowError(ex.Message); return; }
+        PeriodsList.Items.Add(period);
+        ErrorText.Visibility = Visibility.Collapsed;
+    }
 
-        if (!TimeOnly.TryParseExact(input, "HH:mm", CultureInfo.InvariantCulture, DateTimeStyles.None, out var parsed))
-            return false;
-
-        normalized = parsed.ToString("HH:mm", CultureInfo.InvariantCulture);
-        return true;
+    private void OnRemovePeriod(object sender, RoutedEventArgs e)
+    {
+        if (PeriodsList.SelectedItem is { } selected) PeriodsList.Items.Remove(selected);
     }
 
     private void ShowError(string message)

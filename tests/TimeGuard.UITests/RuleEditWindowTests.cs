@@ -64,7 +64,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         FillField(ruleWindow, "BreakEveryBox",    "60");   // equals limit — invalid
         FillField(ruleWindow, "BreakDurationBox", "5");
 
-        ruleWindow.FindButton("Save").Click();
+        ruleWindow.FindButton("Save").Invoke();
         Thread.Sleep(300);
 
         // Window must still be open (save was blocked)
@@ -95,7 +95,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         FillField(ruleWindow, "BreakEveryBox",    "90");   // exceeds limit — invalid
         FillField(ruleWindow, "BreakDurationBox", "5");
 
-        ruleWindow.FindButton("Save").Click();
+        ruleWindow.FindButton("Save").Invoke();
         Thread.Sleep(300);
 
         var error = ruleWindow.FindTextContaining("Break interval");
@@ -120,7 +120,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         FillField(ruleWindow, "BreakEveryBox",    "60");
         FillField(ruleWindow, "BreakDurationBox", "10");
 
-        ruleWindow.FindButton("Save").Click();
+        ruleWindow.FindButton("Save").Invoke();
         Thread.Sleep(300);
 
         // Window should have closed — save succeeded
@@ -146,7 +146,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         FillField(ruleWindow, "BreakEveryBox",    "30");
         FillField(ruleWindow, "BreakDurationBox", "45");  // > breakEvery — invalid
 
-        ruleWindow.FindButton("Save").Click();
+        ruleWindow.FindButton("Save").Invoke();
         Thread.Sleep(300);
 
         var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
@@ -175,7 +175,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         FillField(ruleWindow, "BreakEveryBox",    "30");
         FillField(ruleWindow, "BreakDurationBox", "30");  // equals breakEvery — valid
 
-        ruleWindow.FindButton("Save").Click();
+        ruleWindow.FindButton("Save").Invoke();
         Thread.Sleep(300);
 
         var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
@@ -186,7 +186,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
     }
 
     [Fact]
-    public void Save_PersistsWeekdaySpecificLimitAndWindow()
+    public void Save_PersistsWeekdaySpecificLimitAndDowntime()
     {
         const string processName = "weekdayscheduleapp";
 
@@ -197,10 +197,12 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         FillField(ruleWindow, "ProcessNameBox",          processName);
         FillField(ruleWindow, "MondayLimitBox",          "60");
         FillField(ruleWindow, "WednesdayLimitBox",       "30");
-        FillField(ruleWindow, "WednesdayWindowStartBox", "12:00");
-        FillField(ruleWindow, "WednesdayWindowEndBox",   "14:00");
+        ruleWindow.FindFirstDescendant(cf => cf.ByAutomationId("PeriodDayBox")).AsComboBox().Select("Wednesday");
+        FillField(ruleWindow, "PeriodStartBox", "12:00");
+        FillField(ruleWindow, "PeriodEndBox", "14:00");
+        ruleWindow.FindButton("Add period").Invoke();
 
-        ruleWindow.FindButton("Save").Click();
+        ruleWindow.FindButton("Save").Invoke();
         Thread.Sleep(500);
 
         var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
@@ -212,12 +214,65 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
 
         Assert.Equal(60, saved.GetScheduleForDay(DayOfWeek.Monday).DailyLimitMinutes);
         Assert.Equal(30, saved.GetScheduleForDay(DayOfWeek.Wednesday).DailyLimitMinutes);
-        Assert.Equal("12:00", saved.GetScheduleForDay(DayOfWeek.Wednesday).AllowedWindowStart);
-        Assert.Equal("14:00", saved.GetScheduleForDay(DayOfWeek.Wednesday).AllowedWindowEnd);
+        var period = Assert.Single(saved.BlockedPeriods);
+        Assert.Equal(DayOfWeek.Wednesday, period.StartDayOfWeek);
+        Assert.Equal(720, period.StartMinute);
+        Assert.Equal(840, period.EndMinute);
 
         settings.Close();
     }
 
+    [Fact]
+    public void Downtime_AddRemoveMultiplePeriods_CrossMidnightRoundtrip()
+    {
+        var settings = OpenSettingsWindow();
+        var editor = OpenRuleEditWindow(settings);
+        FillField(editor, "DisplayNameBox", "Overnight helper");
+        FillField(editor, "ProcessNameBox", "overnight-helper");
+        editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodDayBox")).AsComboBox().Select("Sunday");
+        FillField(editor, "PeriodStartBox", "22:00");
+        FillField(editor, "PeriodEndBox", "08:00");
+        editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodNextDayBox")).AsCheckBox().IsChecked = true;
+        editor.FindButton("Add period").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodsList")).AsListBox().Items.Length == 1, TimeSpan.FromSeconds(3)));
+        editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodDayBox")).AsComboBox().Select("Monday");
+        FillField(editor, "PeriodStartBox", "08:00");
+        FillField(editor, "PeriodEndBox", "17:00");
+        editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodNextDayBox")).AsCheckBox().IsChecked = false;
+        editor.FindButton("Add period").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodsList")).AsListBox().Items.Length == 2, TimeSpan.FromSeconds(3)));
+        FillField(editor, "PeriodStartBox", "17:00");
+        FillField(editor, "PeriodEndBox", "18:00");
+        editor.FindButton("Add period").Invoke();
+        var list = editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodsList")).AsListBox();
+        Assert.True(SpinWait.SpinUntil(() => list.Items.Length == 3, TimeSpan.FromSeconds(3)));
+        list.Items[2].Select();
+        editor.FindButton("Remove period").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => list.Items.Length == 2, TimeSpan.FromSeconds(3)));
+        editor.FindButton("Save").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => _fx.OpenDatabase().GetRules().Any(r => r.ProcessName == "overnight-helper"), TimeSpan.FromSeconds(3)));
+        var saved = _fx.OpenDatabase().GetRules().Single(r => r.ProcessName == "overnight-helper");
+        Assert.Equal(2, saved.BlockedPeriods.Count);
+        Assert.Contains(saved.BlockedPeriods, p => p.StartDayOfWeek == DayOfWeek.Sunday && p.EndDayOffset == 1 && p.StartMinute == 1320 && p.EndMinute == 480);
+        Assert.Contains(saved.BlockedPeriods, p => p.StartDayOfWeek == DayOfWeek.Monday && p.StartMinute == 480 && p.EndMinute == 1020);
+        settings.Close();
+    }
+
+    [Theory]
+    [InlineData("08:00", "08:00", "duration")]
+    [InlineData("22:00", "08:00", "duration")]
+    [InlineData("25:00", "08:00", "HH:mm")]
+    public void Downtime_InvalidInput_IsExplicitAndDoesNotAddPeriod(string start, string end, string errorText)
+    {
+        var settings = OpenSettingsWindow();
+        var editor = OpenRuleEditWindow(settings);
+        FillField(editor, "PeriodStartBox", start);
+        FillField(editor, "PeriodEndBox", end);
+        editor.FindButton("Add period").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => editor.FindTextContaining(errorText) is not null, TimeSpan.FromSeconds(2)));
+        Assert.Empty(editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodsList")).AsListBox().Items);
+        editor.Close(); settings.Close();
+    }
     [Fact]
     public void Save_DuplicateCanonicalProcess_ShowsErrorWithoutCrashingOrChangingRule()
     {

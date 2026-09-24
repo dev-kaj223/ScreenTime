@@ -20,6 +20,10 @@ internal sealed class FakeTerminator : IProcessTerminator
 internal sealed class TestClock : TimeProvider
 {
     public DateTimeOffset Now { get; set; } = new(2026, 9, 23, 10, 0, 0, TimeSpan.Zero);
+    public override long TimestampFrequency => TimeSpan.TicksPerSecond;
+    public long? Timestamp { get; set; }
+    public TimeZoneInfo Zone { get; set; } = TimeZoneInfo.Utc;
+    public override long GetTimestamp() => Timestamp ?? Now.UtcTicks;
     public override DateTimeOffset GetUtcNow() => Now;
-    public override TimeZoneInfo LocalTimeZone => TimeZoneInfo.Utc;
+    public override TimeZoneInfo LocalTimeZone => Zone;
 }
