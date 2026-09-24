@@ -33,7 +33,9 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
         var path = Path.Combine(fx.Runtime.Paths.Root, "notice-diagnostics.jsonl");
         var inputPath = Path.Combine(fx.Runtime.Paths.Root, "helper-input.txt");
         using var signal = EventWaitHandle.OpenExisting(fx.Runtime.NoticeEventName);
-        for (var kind = 0; kind < 5; kind++)
+        var heights = new List<double>();
+        var headings = new[] { "TIME REMAINING", "5 MINUTES LEFT", "FINISH YOUR SESSION", "FINAL WARNING", "TIME EXPIRED", "FINAL MINUTE" };
+        for (var kind = 0; kind < 6; kind++)
         {
             Assert.Equal(helperHwnd, GetForegroundWindow());
             signal.Set();
@@ -50,6 +52,10 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
             Assert.False(notice.Properties.IsKeyboardFocusable.Value);
             Assert.Equal(new IntPtr(3), SendMessage(hwnd, 0x21, helperHwnd, IntPtr.Zero));
             var bounds = notice.BoundingRectangle;
+            heights.Add(bounds.Height);
+            Assert.Equal(headings[kind], notice.FindFirstDescendant(cf => cf.ByAutomationId("NoticeHeading")).Name);
+            Assert.NotNull(notice.FindFirstDescendant(cf => cf.ByAutomationId("ScreenTimeBrand")));
+            notice.CaptureToFile(Path.Combine(AppContext.BaseDirectory, $"notice-presentation-{kind}.png"));
             var point = new System.Drawing.Point((int)(bounds.Left + bounds.Width / 2), (int)(bounds.Top + bounds.Height / 2));
             var packed = new IntPtr((point.Y << 16) | (point.X & 0xffff));
             Assert.Equal(new IntPtr(-1), SendMessage(hwnd, 0x84, IntPtr.Zero, packed));
@@ -75,11 +81,12 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
             Assert.Equal(helperHwnd, GetForegroundWindow());
             Assert.False(IsIconic(helperHwnd));
             Assert.True(SpinWait.SpinUntil(() => !fx.App.GetAllTopLevelWindows(fx.Automation)
-                .Any(w => w.Properties.NativeWindowHandle.Value == hwnd), TimeSpan.FromSeconds(8)));
+                .Any(w => w.Properties.NativeWindowHandle.Value == hwnd), TimeSpan.FromSeconds(kind == 5 ? 65 : 8)));
         }
+        Assert.True(heights[2] > heights[0], "Grace text must grow naturally beyond the short quota notice.");
         var rows = File.ReadAllLines(path).Select(line => JsonSerializer.Deserialize<Sample>(line)!).ToArray();
-        Assert.Equal(5, rows.Count(r => r.Stage == "Shown"));
-        Assert.Equal(5, rows.Count(r => r.Stage == "Closed"));
+        Assert.Equal(6, rows.Count(r => r.Stage == "Shown"));
+        Assert.Equal(6, rows.Count(r => r.Stage == "Closed"));
         foreach (var row in rows.Where(r => r.Stage != "Closed"))
         {
             Assert.Equal(helperHwnd.ToInt64(), row.ForegroundBefore);
@@ -94,7 +101,16 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
         // HWND values can be reused; pair each sequential show/close rather than grouping by HWND.
         var shows = rows.Where(r => r.Stage == "Shown").ToArray();
         var closes = rows.Where(r => r.Stage == "Closed").ToArray();
-        for (var i = 0; i < shows.Length; i++) Assert.InRange((closes[i].AtUtc - shows[i].AtUtc).TotalSeconds, 5, 8);
+        for (var i = 0; i < 5; i++) Assert.InRange((closes[i].AtUtc - shows[i].AtUtc).TotalSeconds, 5, 8);
+        Assert.InRange((closes[5].AtUtc - shows[5].AtUtc).TotalSeconds, 57, 61);
+        var countdown = rows.Where(r => r.Stage != "Closed" && !string.IsNullOrEmpty(r.Countdown)).ToArray();
+        var changes = countdown.Where((r, i) => i == 0 || r.Countdown != countdown[i - 1].Countdown).ToArray();
+        Assert.InRange(changes.Length, 57, 61);
+        for (var i = 1; i < changes.Length; i++)
+        {
+            Assert.InRange((changes[i].AtUtc - changes[i - 1].AtUtc).TotalSeconds, 0.7, 1.5);
+            Assert.True(TimeSpan.Parse("0:" + changes[i].Countdown) < TimeSpan.Parse("0:" + changes[i - 1].Countdown));
+        }
         var artifact = Path.Combine(AppContext.BaseDirectory, $"notice-samples-{Guid.NewGuid():N}.jsonl");
         File.Copy(path, artifact);
         output.WriteLine($"Verified {rows.Length} samples; durations: {string.Join(", ", shows.Select((s, i) => (closes[i].AtUtc - s.AtUtc).TotalSeconds.ToString("F3")))}. Artifact: {artifact}");
@@ -117,5 +133,6 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
     }
 
     private sealed record Sample(string Stage, DateTimeOffset AtUtc, long Hwnd, long ForegroundBefore,
-        long Foreground, long Active, long Focus, bool KeyboardFocusWithin, bool MouseCaptured, int ExtendedStyles);
+        long Foreground, long Active, long Focus, bool KeyboardFocusWithin, bool MouseCaptured, int ExtendedStyles,
+        string Countdown, double Width, double Height);
 }

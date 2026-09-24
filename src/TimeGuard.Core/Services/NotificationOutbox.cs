@@ -37,7 +37,8 @@ internal sealed class NotificationOutbox(IStateStore store, Func<NotificationReq
             }
             try
             {
-                if (current(request) && (request.Kind == NotificationKind.Blocked || store.TryRecordNotification(request)) && current(request))
+                // Live final-minute state may resume after restart; it has no durable delivery receipt or per-second writes.
+                if (current(request) && (request.Kind is NotificationKind.Blocked or NotificationKind.GraceFinalMinute || store.TryRecordNotification(request)) && current(request))
                     _ready.Writer.TryWrite(request);
             }
             catch (Exception ex) { logger.TryWrite("Error", "NotificationReceiptFailed", ex); }

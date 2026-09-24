@@ -1,6 +1,6 @@
 namespace TimeGuard.Models;
 
-public enum NotificationKind { QuotaTenMinutes, QuotaFiveMinutes, GraceStarted, GraceFiveMinutes, Blocked }
+public enum NotificationKind { QuotaTenMinutes, QuotaFiveMinutes, GraceStarted, GraceFiveMinutes, Blocked, GraceFinalMinute }
 
 /// <summary>Display facts only. ValidUntilUtc expires the request, never permission.</summary>
 public sealed record NotificationRequest(string ReceiptKey, string AppKey, string DisplayName,

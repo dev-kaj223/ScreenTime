@@ -162,12 +162,14 @@ public partial class App : WpfApplication
         {
             if (_stopEvent.WaitOne(0)) { await StopAndShutdownAsync(0); return; }
             if (!_noticeEvent.WaitOne(0)) return;
-            var kind = (TimeGuard.Models.NotificationKind)(_previewIndex++ % 5);
+            var kind = (TimeGuard.Models.NotificationKind)(_previewIndex++ % 6);
             var now = DateTimeOffset.UtcNow;
             var minutes = kind == TimeGuard.Models.NotificationKind.QuotaTenMinutes ? 10 :
-                kind == TimeGuard.Models.NotificationKind.GraceStarted ? 20 : 5;
-            var grace = kind is TimeGuard.Models.NotificationKind.GraceStarted or TimeGuard.Models.NotificationKind.GraceFiveMinutes;
-            _previewNotice = new("preview", "preview", "ScreenTime preview", kind, now, now.AddSeconds(15),
+                kind == TimeGuard.Models.NotificationKind.GraceStarted ? 20 :
+                kind == TimeGuard.Models.NotificationKind.GraceFinalMinute ? 1 : 5;
+            var grace = kind is TimeGuard.Models.NotificationKind.GraceStarted or TimeGuard.Models.NotificationKind.GraceFiveMinutes or TimeGuard.Models.NotificationKind.GraceFinalMinute;
+            _previewNotice = new("preview", "preview", "ScreenTime preview", kind, now,
+                now.AddSeconds(kind == TimeGuard.Models.NotificationKind.GraceFinalMinute ? 60 : 15),
                 TimeSpan.FromMinutes(minutes), grace ? "preview" : null, grace ? now.AddMinutes(minutes) : null);
         };
         _testCommands.Start();

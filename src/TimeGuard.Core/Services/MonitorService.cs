@@ -310,7 +310,11 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 _accounting.Forget(result.Target);
             var next = _downtime.MidnightAfter(now);
             foreach (var episode in _grace.Where(e => e.Phase == GracePhase.Active))
+            {
                 if (episode.ExpiresAtUtc < next) next = episode.ExpiresAtUtc;
+                var finalMinute = episode.ExpiresAtUtc.AddSeconds(-60);
+                if (finalMinute > now && finalMinute < next) next = finalMinute;
+            }
             foreach (var decision in decisions)
             {
                 foreach (var boundary in new[] { decision.DowntimeEnd, decision.NextDowntimeStart })

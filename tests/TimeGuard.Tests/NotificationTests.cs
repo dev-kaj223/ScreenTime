@@ -166,6 +166,63 @@ public class NotificationTests
         public void CloseSession(int sessionId, double timeSinceBreakMins = 0) => db.CloseSession(sessionId, timeSinceBreakMins);
     }
 
+    [Fact] public async Task FinalMinute_UsesPersistedDeadline_NoReceipts_ResumesAfterRestart_ExpiresWithoutDelivery()
+    {
+        using var p = new TempProfile(); var db = new DatabaseService(p.Runtime.Paths); var clock = new TestClock();
+        var episode = new GraceEpisode("original", "helper", Day, clock.Now.AddMinutes(-19), clock.Now.AddSeconds(61),
+            GracePhase.Active, null, [Helper]);
+        db.CommitObservation([new DailyLog { Date = Day, Entries = [new() { ProcessName = "helper", QuotaSeconds = 660, ObservedSeconds = 660 }] }], [episode]);
+        var writes = 0;
+        var store = new ReceiptStore(db, _ => { writes++; return true; });
+        var terminator = new FakeTerminator();
+        await using (var monitor = new MonitorService(store, new(), Config(), processes: new FakeProcesses(() => [Helper]), terminator: terminator, time: clock))
+        {
+            await monitor.TickAsync(); var five = await Read(monitor, NotificationKind.GraceFiveMinutes);
+            clock.Now = clock.Now.AddSeconds(1);
+            await monitor.TickAsync(); var final = await Read(monitor, NotificationKind.GraceFinalMinute);
+            Assert.False(monitor.IsNotificationCurrent(five));
+            Assert.Equal(episode.ExpiresAtUtc, final.GraceDeadlineUtc);
+            Assert.Equal(episode.ExpiresAtUtc, final.ValidUntilUtc);
+            for (var i = 0; i < 20; i++)
+            {
+                clock.Now = clock.Now.AddSeconds(1); await monitor.TickAsync();
+                Assert.True(monitor.IsNotificationCurrent(final));
+                Assert.False(monitor.TryReadNotification(out _));
+            }
+            Assert.Equal(1, writes); // Only the five-minute notice attempted a receipt.
+        }
+        await using var restarted = new MonitorService(store, new(), Config(), processes: new FakeProcesses(() => [Helper]), terminator: terminator, time: clock);
+        await restarted.TickAsync(); var recovered = await Read(restarted, NotificationKind.GraceFinalMinute);
+        Assert.Equal(TimeSpan.FromSeconds(40), recovered.Remaining);
+        Assert.Equal(episode.ExpiresAtUtc, recovered.GraceDeadlineUtc);
+        Assert.Equal(1, writes);
+        clock.Now = episode.ExpiresAtUtc;
+        await restarted.TickAsync();
+        Assert.False(restarted.IsNotificationCurrent(recovered));
+        Assert.Contains(Helper, terminator.Targets);
+        Assert.Equal(GracePhase.Expired, Assert.Single(db.LoadGraceEpisodes()).Phase);
+        Assert.Equal(episode.ExpiresAtUtc, Assert.Single(db.LoadGraceEpisodes()).EndedAtUtc);
+    }
+
+    [Theory] [InlineData(false)] [InlineData(true)]
+    public async Task FinalMinute_InvalidatedByExitOrConfiguration(bool reload)
+    {
+        using var p = new TempProfile(); var db = new DatabaseService(p.Runtime.Paths); var clock = new TestClock();
+        IReadOnlyList<ProcessInstance> live = [Helper];
+        var episode = new GraceEpisode("original", "helper", Day, clock.Now.AddMinutes(-19), clock.Now.AddSeconds(30), GracePhase.Active, null, [Helper]);
+        db.CommitObservation([], [episode]);
+        await using var monitor = Monitor(db, clock, processes: () => live);
+        await monitor.TickAsync(); var final = await Read(monitor, NotificationKind.GraceFinalMinute);
+        if (reload)
+        {
+            var config = Config(); config.Rules[0].Enabled = false; monitor.ReloadConfig(config);
+            Assert.False(monitor.IsNotificationCurrent(final));
+        }
+        else live = [];
+        await monitor.TickAsync(); Assert.False(monitor.IsNotificationCurrent(final));
+        Assert.False(File.Exists(p.Runtime.Paths.NotificationDatabasePath));
+    }
+
     [Theory] [InlineData(false)] [InlineData(true)]
     public void SchemaThreeMigration_BackupIdempotenceOrRollback_PreservesGrace(bool collision)
     {

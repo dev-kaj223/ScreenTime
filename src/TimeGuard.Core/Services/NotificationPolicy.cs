@@ -12,9 +12,11 @@ public static class NotificationPolicy
         if (decision.Grace is { Phase: GracePhase.Active } grace && now < grace.ExpiresAtUtc)
         {
             var remaining = grace.ExpiresAtUtc - now;
-            var kind = remaining <= TimeSpan.FromMinutes(5) ? NotificationKind.GraceFiveMinutes : NotificationKind.GraceStarted;
+            var kind = remaining <= TimeSpan.FromMinutes(1) ? NotificationKind.GraceFinalMinute :
+                remaining <= TimeSpan.FromMinutes(5) ? NotificationKind.GraceFiveMinutes : NotificationKind.GraceStarted;
             return new($"grace:{grace.Id}:{kind}", decision.AppKey, decision.DisplayName, kind, now,
-                Min(now.AddSeconds(15), grace.ExpiresAtUtc), remaining, grace.Id, grace.ExpiresAtUtc);
+                kind == NotificationKind.GraceFinalMinute ? grace.ExpiresAtUtc : Min(now.AddSeconds(15), grace.ExpiresAtUtc),
+                remaining, grace.Id, grace.ExpiresAtUtc);
         }
         if (!decision.MayContinue || remainingSeconds <= 0 || remainingSeconds > 600) return null;
         var quotaKind = remainingSeconds <= 300 ? NotificationKind.QuotaFiveMinutes : NotificationKind.QuotaTenMinutes;
@@ -27,9 +29,15 @@ public static class NotificationPolicy
         if (decision is null || now >= request.ValidUntilUtc) return false;
         return request.Kind switch
         {
-            NotificationKind.GraceStarted or NotificationKind.GraceFiveMinutes =>
+            NotificationKind.GraceStarted or NotificationKind.GraceFiveMinutes or NotificationKind.GraceFinalMinute =>
                 decision.Grace is { Phase: GracePhase.Active } grace && grace.Id == request.EpisodeId &&
-                now < grace.ExpiresAtUtc && (request.Kind != NotificationKind.GraceStarted || grace.ExpiresAtUtc - now > TimeSpan.FromMinutes(5)),
+                request.GraceDeadlineUtc == grace.ExpiresAtUtc && now < grace.ExpiresAtUtc &&
+                (request.Kind switch
+                {
+                    NotificationKind.GraceStarted => grace.ExpiresAtUtc - now > TimeSpan.FromMinutes(5),
+                    NotificationKind.GraceFiveMinutes => grace.ExpiresAtUtc - now > TimeSpan.FromMinutes(1),
+                    _ => grace.ExpiresAtUtc - now <= TimeSpan.FromMinutes(1)
+                }),
             NotificationKind.Blocked => !decision.MayLaunch,
             _ => decision.MayContinue && decision.Grace is null
         };

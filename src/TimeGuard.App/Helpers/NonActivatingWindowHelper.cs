@@ -26,16 +26,25 @@ internal static class NonActivatingWindowHelper
         var previous = SetWindowLong(hwnd, -20, GetWindowLong(hwnd, -20) | PassiveStyles);
         if (previous == 0 && Marshal.GetLastPInvokeError() != 0) throw new System.ComponentModel.Win32Exception();
         HwndSource.FromHwnd(hwnd).AddHook(WindowMessage);
+        Place(window, hwnd, foreground);
+        return hwnd;
+    }
+
+    internal static void Place(Window window, IntPtr hwnd, IntPtr foreground)
+    {
         // Monitor work bounds are physical pixels; WPF dimensions are DIPs.
         var info = new MonitorInfo { Size = Marshal.SizeOf<MonitorInfo>() };
         if (!GetMonitorInfo(MonitorFromWindow(foreground, 2), ref info)) throw new System.ComponentModel.Win32Exception();
         var dpi = System.Windows.Media.VisualTreeHelper.GetDpi(window);
+        window.MaxWidth = Math.Min(420, (info.Work.Right - info.Work.Left) / dpi.DpiScaleX);
+        window.MaxHeight = Math.Min(360, (info.Work.Bottom - info.Work.Top) / dpi.DpiScaleY);
+        var content = (FrameworkElement)window.Content;
+        content.Measure(new System.Windows.Size(Math.Min(window.Width, window.MaxWidth), window.MaxHeight));
         var width = Math.Min((int)Math.Ceiling(window.Width * dpi.DpiScaleX), info.Work.Right - info.Work.Left);
-        var height = Math.Min((int)Math.Ceiling(window.Height * dpi.DpiScaleY), info.Work.Bottom - info.Work.Top);
+        var height = Math.Min((int)Math.Ceiling(Math.Clamp(content.DesiredSize.Height, window.MinHeight, window.MaxHeight) * dpi.DpiScaleY), info.Work.Bottom - info.Work.Top);
         if (!SetWindowPos(hwnd, new IntPtr(-1), Math.Max(info.Work.Left, info.Work.Right - width - 20),
             Math.Max(info.Work.Top, info.Work.Bottom - height - 20), width, height, 0x10 | 0x20)) // NOACTIVATE, FRAMECHANGED
             throw new System.ComponentModel.Win32Exception();
-        return hwnd;
     }
 
     private static IntPtr WindowMessage(IntPtr hwnd, int message, IntPtr wParam, IntPtr lParam, ref bool handled)
