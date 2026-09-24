@@ -77,7 +77,22 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         {
             try { await RunLoop(_cts.Token).ConfigureAwait(false); }
             catch (OperationCanceledException) when (_cts.IsCancellationRequested) { }
-            finally { CloseAllSessions(); }
+            catch (Exception ex)
+            {
+                LastFault = ex;
+                throw;
+            }
+            finally
+            {
+                try { CloseAllSessions(); }
+                catch (Exception ex)
+                {
+                    _logger.TryWrite("Error", "MonitorSessionCleanupFailed", ex);
+                    // Preserve a pending worker exception and its original stack trace.
+                    // With no worker failure, cleanup itself must fault Completion.
+                    if (LastFault is null) throw;
+                }
+            }
             _logger.TryWrite("Information", "MonitorStopped");
         }
         catch (Exception ex)

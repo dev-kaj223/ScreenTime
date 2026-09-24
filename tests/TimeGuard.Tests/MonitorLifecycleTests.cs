@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using Microsoft.Data.Sqlite;
 using TimeGuard.Models;
 using TimeGuard.Services;
 using Xunit;
@@ -17,6 +18,87 @@ public class MonitorLifecycleTests
     private sealed class ThrowingLogger : IAppLogger
     {
         public void Write(string level, string eventName, Exception? exception = null) => throw new IOException("disk unavailable");
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, true)]
+    [InlineData(false, false)]
+    public async Task Supervision_PreservesWorkerFailure_AndReportsSessionCleanupFailure(
+        bool failWorker, bool failCleanup)
+    {
+        using var profile = new TempProfile();
+        var db = new DatabaseService(profile.Runtime.Paths);
+        var logger = new RecordingLogger();
+        var workerFailure = new InvalidOperationException("original worker failure");
+        var config = new AppConfig
+        {
+            Rules = [new AppRule { ProcessName = "helper", DailyLimitMinutes = 5 }]
+        };
+        var monitor = new MonitorService(db, new RulesEngine(), config, logger,
+            () => new() { ["helper"] = "owned test helper" });
+        monitor.WarnRequested += (_, _) =>
+        {
+            // The first warning occurs after the real session has been opened.
+            // Fail only session closure, leaving the rest of the tick/storage intact.
+            if (failCleanup)
+            {
+                using var connection = new SqliteConnection($"Data Source={profile.Runtime.Paths.DatabasePath}");
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = """
+                    CREATE TRIGGER FailSessionClose BEFORE UPDATE OF EndTime ON Sessions
+                    BEGIN SELECT RAISE(ABORT, 'injected session cleanup failure'); END;
+                    """;
+                command.ExecuteNonQuery();
+            }
+            if (failWorker) throw workerFailure;
+            monitor.Dispose(); // Request normal cancellation after a completed observation.
+        };
+        monitor.Start();
+        try
+        {
+            var error = await Record.ExceptionAsync(() => monitor.Completion.WaitAsync(TimeSpan.FromSeconds(5)));
+            if (failWorker || failCleanup)
+            {
+                Assert.True(monitor.Completion.IsFaulted);
+                Assert.Same(error, monitor.LastFault);
+                if (failWorker)
+                {
+                    Assert.Same(workerFailure, error);
+                    Assert.Contains(nameof(Supervision_PreservesWorkerFailure_AndReportsSessionCleanupFailure), error!.StackTrace);
+                }
+                else
+                    Assert.IsType<SqliteException>(error);
+                Assert.Same(error, Assert.Single(logger.Entries, e => e.Event == "MonitorFaulted").Error);
+                Assert.DoesNotContain(logger.Entries, e => e.Event == "MonitorStopped");
+            }
+            else
+            {
+                Assert.Null(error);
+                Assert.Null(monitor.LastFault);
+                Assert.True(monitor.Completion.IsCompletedSuccessfully);
+                Assert.Contains(logger.Entries, e => e.Event == "MonitorStopped");
+                Assert.DoesNotContain(logger.Entries, e => e.Level is "Error" or "Critical");
+                Assert.Contains("T", Assert.Single(db.LoadSessionsForDay(DateOnly.FromDateTime(DateTime.Today))).EndTime);
+            }
+
+            if (failCleanup)
+            {
+                var cleanup = Assert.Single(logger.Entries, e => e.Event == "MonitorSessionCleanupFailed");
+                Assert.Equal("Error", cleanup.Level);
+                Assert.Contains("injected session cleanup failure", Assert.IsType<SqliteException>(cleanup.Error).Message);
+                if (failWorker) Assert.NotSame(error, cleanup.Error);
+                else Assert.Same(error, cleanup.Error);
+            }
+            else
+                Assert.DoesNotContain(logger.Entries, e => e.Event == "MonitorSessionCleanupFailed");
+        }
+        finally
+        {
+            // StopAsync also awaits a faulted worker; observe it while releasing its resources.
+            await Record.ExceptionAsync(() => monitor.StopAsync().WaitAsync(TimeSpan.FromSeconds(5)));
+        }
     }
 
     [Fact]

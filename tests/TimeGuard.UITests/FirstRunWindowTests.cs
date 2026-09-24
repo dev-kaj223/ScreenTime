@@ -1,6 +1,7 @@
 using FlaUI.Core.Input;
 using TimeGuard.UITests.Helpers;
 using Xunit;
+using Xunit.Abstractions;
 
 namespace TimeGuard.UITests;
 
@@ -10,6 +11,8 @@ namespace TimeGuard.UITests;
 /// </summary>
 public class FirstRunWindowTests : IDisposable
 {
+    private readonly ITestOutputHelper _output;
+    public FirstRunWindowTests(ITestOutputHelper output) => _output = output;
     private readonly AppFixture _fx = new();
     public void Dispose() => _fx.Dispose();
 
@@ -57,17 +60,21 @@ public class FirstRunWindowTests : IDisposable
 
         Assert.True(boxes.Length >= 2, $"Expected 2+ PasswordBox controls, found {boxes.Length}.");
 
-        boxes[0].Click();
-        Thread.Sleep(100);
-        Keyboard.Type(AppFixture.TestPassword);
-        Thread.Sleep(100);
+        foreach (var box in boxes.Take(2))
+        {
+            // UIA focus is explicit and verified before sending keyboard input; a coordinate
+            // click plus a fixed sleep does not establish where the password will be typed.
+            box.Focus();
+            Assert.True(SpinWait.SpinUntil(() => box.Properties.HasKeyboardFocus.Value,
+                TimeSpan.FromSeconds(5)), "Password field did not receive keyboard focus.");
+            Keyboard.Type(AppFixture.TestPassword);
+            _fx.App.WaitWhileBusy(TimeSpan.FromSeconds(5));
+        }
 
-        boxes[1].Click();
-        Thread.Sleep(100);
-        Keyboard.Type(AppFixture.TestPassword);
-        Thread.Sleep(100);
-
-        win.FindButton("Get Started →").Click();
+        var startButton = win.FindButton("Get Started →");
+        Assert.True(SpinWait.SpinUntil(() => startButton.IsEnabled && !startButton.IsOffscreen,
+            TimeSpan.FromSeconds(5)), "Get Started button did not become ready.");
+        startButton.Invoke();
 
         // Poll until the FirstRunWindow disappears (up to 5s)
         var deadline = DateTime.UtcNow.AddSeconds(5);
@@ -85,6 +92,8 @@ public class FirstRunWindowTests : IDisposable
             catch { /* process may be transitioning */ }
         }
 
+        if (!closed)
+            _output.WriteLine("Validation: " + win.FindFirstDescendant(cf => cf.ByAutomationId("ErrorText"))?.Name);
         Assert.True(closed, "FirstRunWindow should have closed after valid password setup.");
     }
 }

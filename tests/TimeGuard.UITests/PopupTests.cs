@@ -1,52 +1,56 @@
 using System.Diagnostics;
+using FlaUI.Core.AutomationElements;
 using TimeGuard.UITests.Helpers;
 using TimeGuard.Services;
 using Xunit;
 
 namespace TimeGuard.UITests;
 
-/// <summary>
-/// Tests the BlockedPopup window.
-/// The fixture seeds a "screentime.testprocess" rule that is already over-limit, then starts
-/// the owned helper so MonitorService detects it running and fires BlockRequested.
-/// </summary>
-public class PopupTests : IClassFixture<PopupTestFixture>
+/// <summary>Each test starts with a fresh profile and exercises every popup from its owned launch.</summary>
+public class PopupTests : IDisposable
 {
-    private readonly PopupTestFixture _fx;
-
-    public PopupTests(PopupTestFixture fx) => _fx = fx;
+    private readonly PopupTestFixture _fx = new();
+    public void Dispose() => _fx.Dispose();
 
     [Fact]
     public void BlockedPopup_ShowsCorrectTitle()
     {
         _fx.EnsureHelperRunning();
-        var popup = _fx.App.WaitForWindow(_fx.Automation, "Time's Up",
-            timeout: TimeSpan.FromSeconds(20));
-        Assert.Contains("Time", popup.Title);
+        var popups = _fx.WaitForInitialBlockPopups();
+        foreach (var popup in popups)
+            Assert.Contains("Time", popup.Title);
         Assert.True(_fx.HelperExited());
-        popup.FindButton("OK").Click(); // close so the next test starts clean
-        Thread.Sleep(300);
+        ClosePopupsThroughOk(popups);
     }
 
     [Fact]
     public void BlockedPopup_OkButton_ClosesPopup()
     {
         _fx.EnsureHelperRunning();
-        var popup = _fx.App.WaitForWindow(_fx.Automation, "Time's Up",
-            timeout: TimeSpan.FromSeconds(20));
-        popup.FindButton("OK").Click();
-        Thread.Sleep(500);
+        var popups = _fx.WaitForInitialBlockPopups();
+        ClosePopupsThroughOk(popups);
 
         var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
         Assert.False(windows.Any(w => w.Title?.Contains("Time's Up") == true),
             "BlockedPopup should close after clicking OK.");
     }
+
+    private void ClosePopupsThroughOk(Window[] popups)
+    {
+        foreach (var popup in popups)
+        {
+            var handle = popup.Properties.NativeWindowHandle.Value;
+            // Invoke the actual button: overlapping topmost windows can redirect a coordinate click.
+            popup.FindButton("OK").Invoke();
+            Assert.True(SpinWait.SpinUntil(() =>
+                !_fx.App.GetAllTopLevelWindows(_fx.Automation)
+                    .Any(w => w.Properties.NativeWindowHandle.Value == handle), TimeSpan.FromSeconds(5)),
+                "BlockedPopup should close after clicking OK.");
+        }
+    }
 }
 
-/// <summary>
-/// Fixture that seeds a "screentime.testprocess" rule already over-limit.
-/// Call <see cref="EnsureHelperRunning"/> in each test so the monitor detects the process.
-/// </summary>
+/// <summary>Seeds an over-limit rule; only the fixture-owned helper is eligible for termination.</summary>
 public class PopupTestFixture : AppFixture
 {
     private OwnedProcessIdentity? _helper;
@@ -76,11 +80,23 @@ public class PopupTestFixture : AppFixture
             });
     }
 
-    /// <summary>Launch a fresh owned helper; the app validates its identity before termination.</summary>
-    public void EnsureHelperRunning()
+    public Window[] WaitForInitialBlockPopups()
     {
-        _helper = LaunchHelper();
+        Window[] popups = [];
+        // Characterize the unchanged legacy behavior: initial Block + GetRelaunched
+        // emit two notifications from the same snapshot. Do not mistake one for a stale
+        // popup, or pass the closure assertion before the second has appeared.
+        Assert.True(SpinWait.SpinUntil(() =>
+        {
+            popups = App.GetAllTopLevelWindows(Automation).Where(w => w.Title == "Time's Up").ToArray();
+            return popups.Length == 2 && popups.All(w =>
+                w.FindFirstDescendant(cf => cf.ByName("OK")) is { IsEnabled: true, IsOffscreen: false });
+        }, TimeSpan.FromSeconds(20)), "Expected both initial-block popups and their enabled OK buttons.");
+        return popups;
     }
+
+    /// <summary>Launch a fresh owned helper; the app validates its identity before termination.</summary>
+    public void EnsureHelperRunning() => _helper = LaunchHelper();
 
     public bool HelperExited()
     {
