@@ -36,6 +36,7 @@ public class DatabaseService : IStateStore
     {
         var conn = new SqliteConnection(_connectionString);
         conn.Open();
+        conn.Execute("PRAGMA synchronous=FULL");
         return conn;
     }
 
@@ -226,7 +227,7 @@ public class DatabaseService : IStateStore
         var dateStr = date.ToString("yyyy-MM-dd");
 
         var entries = conn.Query<UsageEntry>("""
-            SELECT Id, ProcessName, ObservedSeconds, QuotaSeconds,
+            SELECT Id, ProcessName, ObservedSeconds, QuotaSeconds, GraceSeconds,
                    Blocked, WarningSent
             FROM DailyUsage WHERE Date = @dateStr
             """, new { dateStr }).ToList();
@@ -262,14 +263,16 @@ public class DatabaseService : IStateStore
 
     private static void UpsertUsage(SqliteConnection conn, SqliteTransaction? tx, DateOnly date, UsageEntry entry)
     {
-        if (entry.ObservedSeconds < 0 || entry.QuotaSeconds < 0) throw new ArgumentException("Usage seconds must be non-negative.");
+        if (entry.ObservedSeconds < 0 || entry.QuotaSeconds < 0 || entry.GraceSeconds < 0 || entry.GraceSeconds > entry.ObservedSeconds)
+            throw new ArgumentException("Usage seconds must be non-negative; grace is a subset of observed runtime.");
         conn.Execute("""
-            INSERT INTO DailyUsage(Date, ProcessName, UsageMins, Blocked, WarningSent, ObservedSeconds, QuotaSeconds)
-            VALUES(@date, @ProcessName, @UsageMinutes, @Blocked, @WarningSent, @ObservedSeconds, @QuotaSeconds)
+            INSERT INTO DailyUsage(Date, ProcessName, UsageMins, Blocked, WarningSent, ObservedSeconds, QuotaSeconds, GraceSeconds)
+            VALUES(@date, @ProcessName, @UsageMinutes, @Blocked, @WarningSent, @ObservedSeconds, @QuotaSeconds, @GraceSeconds)
             ON CONFLICT(Date, ProcessName) DO UPDATE SET
                 UsageMins   = excluded.UsageMins,
                 ObservedSeconds = excluded.ObservedSeconds,
                 QuotaSeconds = excluded.QuotaSeconds,
+                GraceSeconds = excluded.GraceSeconds,
                 Blocked     = excluded.Blocked,
                 WarningSent = excluded.WarningSent
             """, new
@@ -279,9 +282,63 @@ public class DatabaseService : IStateStore
             entry.UsageMinutes,
             entry.ObservedSeconds,
             entry.QuotaSeconds,
+            entry.GraceSeconds,
             entry.Blocked,
             entry.WarningSent
         }, tx);
+    }
+
+    // ── Durable grace ─────────────────────────────────────────────────────────
+
+    public IReadOnlyList<GraceEpisode> LoadGraceEpisodes()
+    {
+        using var conn = Open();
+        return LoadGraceEpisodes(conn, null);
+    }
+
+    private static IReadOnlyList<GraceEpisode> LoadGraceEpisodes(SqliteConnection conn, SqliteTransaction? tx)
+    {
+        var rows = conn.Query("SELECT * FROM GraceEpisodes", transaction: tx);
+        var processes = conn.Query("SELECT * FROM GraceProcesses", transaction: tx).ToArray();
+        return Array.AsReadOnly(rows.Select(e => new GraceEpisode((string)e.Id, (string)e.AppKey, DateOnly.Parse((string)e.QuotaDate),
+            new DateTimeOffset((long)e.StartedAtUtcTicks, TimeSpan.Zero), new DateTimeOffset((long)e.ExpiresAtUtcTicks, TimeSpan.Zero),
+            (GracePhase)(long)e.Phase, e.EndedAtUtcTicks is null ? null : new DateTimeOffset((long)e.EndedAtUtcTicks, TimeSpan.Zero),
+            Array.AsReadOnly(processes.Where(p => (string)p.EpisodeId == (string)e.Id)
+                .Select(p => new ProcessInstance((string)p.AppKey, (int)p.ProcessId, (long)p.StartTimeUtcTicks, (int)p.SessionId)).ToArray())))
+            .ToArray());
+    }
+
+    /// <summary>Usage, fixed deadline, captured set and terminal transitions share one commit.
+    /// A repeated grant returns the durable winner; terminal episodes never reactivate.</summary>
+    public IReadOnlyList<GraceEpisode> CommitObservation(IEnumerable<DailyLog> logs, IEnumerable<GraceEpisode> episodes)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        foreach (var e in episodes)
+        {
+            if (e.Processes.Count == 0 || e.Processes.Any(p => p.AppKey != e.AppKey))
+                throw new ArgumentException("Grace requires captured identities for its canonical application.");
+            var inserted = conn.Execute("""
+                INSERT INTO GraceEpisodes(Id,AppKey,QuotaDate,StartedAtUtcTicks,ExpiresAtUtcTicks,Phase,EndedAtUtcTicks)
+                VALUES(@Id,@AppKey,@date,@start,@expiry,@Phase,@ended)
+                ON CONFLICT(AppKey,QuotaDate) DO NOTHING
+                """, new { e.Id, e.AppKey, date = e.QuotaDate.ToString("yyyy-MM-dd"),
+                    start = e.StartedAtUtc.UtcTicks, expiry = e.ExpiresAtUtc.UtcTicks, e.Phase, ended = e.EndedAtUtc?.UtcTicks }, tx);
+            if (inserted != 0)
+                foreach (var p in e.Processes)
+                    conn.Execute("""
+                        INSERT INTO GraceProcesses(EpisodeId,AppKey,ProcessId,StartTimeUtcTicks,SessionId)
+                        VALUES(@Id,@AppKey,@ProcessId,@StartTimeUtcTicks,@SessionId)
+                        """, new { e.Id, p.AppKey, p.ProcessId, p.StartTimeUtcTicks, p.SessionId }, tx);
+            else if (e.Phase != GracePhase.Active)
+                conn.Execute("UPDATE GraceEpisodes SET Phase=@Phase,EndedAtUtcTicks=@ended WHERE Id=@Id AND Phase=0",
+                    new { e.Id, e.Phase, ended = e.EndedAtUtc?.UtcTicks }, tx);
+        }
+        foreach (var log in logs)
+            foreach (var entry in log.Entries) UpsertUsage(conn, tx, log.Date, entry);
+        var result = LoadGraceEpisodes(conn, tx);
+        tx.Commit();
+        return result;
     }
 
     // ── Sessions ──────────────────────────────────────────────────────────────

@@ -18,7 +18,7 @@ public class Phase3MigrationTests
         _ = new DatabaseService(profile.Runtime.Paths);
         using var c = Open(profile);
         c.Execute("""
-            DROP TABLE BlockedPeriods;
+            DROP TABLE GraceProcesses; DROP TABLE GraceEpisodes; ALTER TABLE DailyUsage DROP COLUMN GraceSeconds; DROP TABLE BlockedPeriods;
             ALTER TABLE DailyUsage DROP COLUMN ObservedSeconds;
             ALTER TABLE DailyUsage DROP COLUMN QuotaSeconds;
             PRAGMA user_version=1;

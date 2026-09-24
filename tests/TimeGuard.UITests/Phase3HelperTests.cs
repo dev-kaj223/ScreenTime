@@ -31,7 +31,7 @@ public class Phase3HelperTests
         var scope = new TestProcessScope(fixture.Runtime.Paths);
         await using var monitor = new MonitorService(db, new(), new() { Rules = [rule] },
             processes: new WindowsProcessMonitor(isAllowedTarget: scope.Contains),
-            terminator: new WindowsProcessTerminator(scope.Contains), time: new RunningClock());
+            terminator: new WindowsProcessTerminator(scope.Contains), time: new RunningClock()) { GraceDurationForTesting = TimeSpan.FromSeconds(2) };
         monitor.Start();
         Assert.True(SpinWait.SpinUntil(() => !Alive(denied), TimeSpan.FromSeconds(3)));
         Assert.Equal(53, db.LoadLog(date).Entries.Single().QuotaSeconds);

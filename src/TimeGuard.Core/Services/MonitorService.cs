@@ -26,6 +26,9 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     private AppRule[] _rulesConfig;
     private AppRule[]? _pendingConfig;
     private DailyLog _log;
+    private IReadOnlyList<GraceEpisode> _grace;
+    internal TimeSpan GraceDurationForTesting { get; init; } = GraceEpisode.DefaultDuration;
+    public IReadOnlyList<GraceEpisode> GraceEpisodes => Volatile.Read(ref _grace);
     private readonly Dictionary<string, int> _sessions = new();
     private IReadOnlyList<PolicyDecision> _decisions = Array.Empty<PolicyDecision>();
     private IReadOnlyList<TerminationResult> _enforcementResults = Array.Empty<TerminationResult>();
@@ -53,6 +56,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         _rulesConfig = CopyRules(config);
         StoppingToken = _cts.Token;
         _log = db.LoadLog(DateOnly.FromDateTime(_time.GetLocalNow().DateTime));
+        _grace = db.LoadGraceEpisodes();
     }
 
     private static AppRule[] CopyRules(AppConfig config)
@@ -198,16 +202,47 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 CloseAllSessions();
                 _log = GetLog(today);
             }
-            _accounting.Observe(now, instances, configured, GetLog, observationTimestamp);
+            var episodes = _grace.ToList();
+            GraceEpisode? Grant(QuotaCrossing crossing)
+            {
+                if (episodes.Any(e => e.AppKey == crossing.AppKey &&
+                    (e.QuotaDate == crossing.QuotaDate || e.Phase == GracePhase.Active))) return null;
+                var episode = new GraceEpisode(Guid.NewGuid().ToString("N"), crossing.AppKey, crossing.QuotaDate,
+                    crossing.ExhaustedAtUtc, crossing.ExhaustedAtUtc + GraceDurationForTesting,
+                    GracePhase.Active, null, crossing.EligibleProcesses);
+                episodes.Add(episode);
+                return episode;
+            }
+            _accounting.Observe(now, instances, configured, GetLog, observationTimestamp, episodes, Grant);
+            for (var i = 0; i < episodes.Count; i++)
+            {
+                var episode = episodes[i];
+                if (episode.Phase != GracePhase.Active) continue;
+                // Expiry wins at the deadline, before any external termination is issued.
+                if (now >= episode.ExpiresAtUtc)
+                    episodes[i] = episode with { Phase = GracePhase.Expired, EndedAtUtc = episode.ExpiresAtUtc };
+                else if (episode.Processes.All(p => !instances.Contains(p) && _processes.ConfirmedExited(p)))
+                    episodes[i] = episode with { Phase = GracePhase.CompletedByExit, EndedAtUtc = now < episode.StartedAtUtc ? episode.StartedAtUtc : now };
+            }
             // Materialize today's zero bucket even when downtime denies the first launch.
             foreach (var rule in configured) _log.GetOrCreate(rule.ProcessName);
-            _db.SaveUsage(logs.Values.Select(log => new DailyLog
-            { Date = log.Date, Entries = log.Entries.Where(e => keys.Contains(e.ProcessName)).ToList() }));
+            var committed = _db.CommitObservation(logs.Values.Select(log => new DailyLog
+            { Date = log.Date, Entries = log.Entries.Where(e => keys.Contains(e.ProcessName)).ToList() }), episodes);
+            foreach (var episode in committed.Where(e => !_grace.Any(old => old.Id == e.Id && old.Phase == e.Phase)))
+                _logger.TryWrite("Information", "Grace" + episode.Phase);
+            Volatile.Write(ref _grace, committed);
             foreach (var name in _sessions.Keys.Where(n => !running.Contains(n)).ToArray()) CloseSession(name);
             foreach (var name in running)
                 if (!_sessions.ContainsKey(name)) _sessions[name] = _db.OpenSession(name);
 
             var decisions = new List<PolicyDecision>();
+            var instanceDecisions = new List<(PolicyDecision Decision, ProcessInstance Instance)>();
+            var eligible = new List<ProcessInstance>();
+            // An inaccessible capture must not escape deadline enforcement just because
+            // enumeration could not read it. The terminator revalidates identity and owner.
+            var enforcementInstances = instances.Concat(_grace.Where(e => e.Phase == GracePhase.Expired)
+                .SelectMany(e => e.Processes).Where(p => keys.Contains(p.AppKey) && !instances.Contains(p) &&
+                    !_processes.ConfirmedExited(p))).Distinct().ToArray();
             foreach (var rule in _rulesConfig)
             {
                 var snapshot = PolicySnapshot.Capture(rule, _log, now, running.Contains(rule.ProcessName), _downtime,
@@ -222,7 +257,14 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                         snapshot = snapshot with { WarningSent = false };
                     }
                 }
-                var decision = _rules.Evaluate(snapshot);
+                var normal = _rules.Evaluate(snapshot);
+                var decision = GracePolicy.Apply(normal, rule.Enabled, _grace, now);
+                foreach (var instance in enforcementInstances.Where(p => p.AppKey == rule.ProcessName))
+                {
+                    var specific = GracePolicy.Apply(normal, rule.Enabled, _grace, now, instance);
+                    instanceDecisions.Add((specific, instance));
+                    if (rule.Enabled && specific.MayContinue && specific.Grace is null) eligible.Add(instance);
+                }
                 if (decision.WarnFiveMinutes)
                 {
                     var entry = _log.GetOrCreate(rule.ProcessName);
@@ -232,14 +274,16 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 decisions.Add(decision);
             }
             Volatile.Write(ref _decisions, decisions.AsReadOnly());
+            _accounting.SetEligible(eligible);
             var results = new List<TerminationResult>();
-            foreach (var decision in decisions.Where(d => d.TerminationRequired))
-                foreach (var instance in instances.Where(p => p.AppKey == decision.AppKey))
-                    results.Add(await _enforcement.EnforceAsync(decision, instance, ct).ConfigureAwait(false));
+            foreach (var (decision, instance) in instanceDecisions.Where(d => d.Decision.TerminationRequired))
+                results.Add(await _enforcement.EnforceAsync(decision, instance, ct).ConfigureAwait(false));
             Volatile.Write(ref _enforcementResults, results.AsReadOnly());
             foreach (var result in results.Where(r => r.Outcome is TerminationOutcome.Terminated or TerminationOutcome.AlreadyExited))
                 _accounting.Forget(result.Target);
             var next = _downtime.MidnightAfter(now);
+            foreach (var episode in _grace.Where(e => e.Phase == GracePhase.Active))
+                if (episode.ExpiresAtUtc < next) next = episode.ExpiresAtUtc;
             foreach (var decision in decisions)
             {
                 foreach (var boundary in new[] { decision.DowntimeEnd, decision.NextDowntimeStart })
@@ -248,7 +292,8 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 if (rule is null || !decision.MayContinue || !running.Contains(rule.ProcessName)) continue;
                 var limit = rule.GetScheduleForDay(today.DayOfWeek).DailyLimitMinutes * 60L;
                 var remaining = limit - _log.GetOrCreate(rule.ProcessName).QuotaSeconds;
-                if (limit > 0 && remaining > 0 && now.AddSeconds(remaining) < next) next = now.AddSeconds(remaining);
+                var exhaustion = now + _accounting.Remaining(rule.ProcessName, today, Math.Max(0, remaining));
+                if (limit > 0 && remaining > 0 && exhaustion < next) next = exhaustion;
             }
             var delay = next - _time.GetUtcNow();
             _nextWait = delay < TimeSpan.FromMilliseconds(100) ? TimeSpan.FromMilliseconds(100) : delay < PollInterval ? delay : PollInterval;
@@ -256,7 +301,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
             // asynchronously; subscriber exceptions are diagnostics, never worker failures.
             foreach (var decision in decisions)
             {
-                if (decision.TerminationRequired) Notify(BlockRequested, decision);
+                if (instanceDecisions.Any(d => d.Instance.AppKey == decision.AppKey && d.Decision.TerminationRequired)) Notify(BlockRequested, decision);
                 else if (decision.WarnFiveMinutes) Notify(WarnRequested, decision);
             }
         }

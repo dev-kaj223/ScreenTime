@@ -6,6 +6,7 @@ namespace TimeGuard.Tests;
 internal sealed class FakeProcesses(Func<IReadOnlyList<ProcessInstance>> snapshot) : IProcessMonitor
 {
     public IReadOnlyList<ProcessInstance> Snapshot(IReadOnlyCollection<string> keys) => snapshot();
+    public bool ConfirmedExited(ProcessInstance instance) => !snapshot().Contains(instance);
 }
 internal sealed class FakeTerminator : IProcessTerminator
 {

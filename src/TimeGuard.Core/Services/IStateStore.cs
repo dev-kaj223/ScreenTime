@@ -8,6 +8,8 @@ public interface IStateStore
     DailyLog LoadLog(DateOnly date);
     void UpsertUsageEntry(DateOnly date, UsageEntry entry);
     void SaveUsage(IEnumerable<DailyLog> logs);
+    IReadOnlyList<GraceEpisode> LoadGraceEpisodes();
+    IReadOnlyList<GraceEpisode> CommitObservation(IEnumerable<DailyLog> logs, IEnumerable<GraceEpisode> episodes);
     int OpenSession(string processName, string windowTitle = "", bool isPassive = false);
     void CloseSession(int sessionId, double timeSinceBreakMins = 0);
 }

@@ -7,6 +7,19 @@ namespace TimeGuard.Services;
 public sealed class WindowsProcessMonitor(IAppLogger? logger = null,
     Func<ProcessInstance, bool>? isAllowedTarget = null) : IProcessMonitor
 {
+    public bool ConfirmedExited(ProcessInstance instance)
+    {
+        try
+        {
+            using var process = Process.GetProcessById(instance.ProcessId);
+            return process.HasExited || new ProcessInstance(process.ProcessName, process.Id,
+                process.StartTime.ToUniversalTime().Ticks, process.SessionId) != instance;
+        }
+        catch (ArgumentException) { return true; }
+        catch (InvalidOperationException) { return true; }
+        catch (Win32Exception ex) { logger.TryWrite("Error", "GraceExitConfirmationFailed", ex); return false; }
+    }
+
     public IReadOnlyList<ProcessInstance> Snapshot(IReadOnlyCollection<string> candidateKeys)
     {
         var instances = new List<ProcessInstance>();

@@ -33,6 +33,8 @@ public class UsageEntry
     }
     public long ObservedSeconds { get; set; }
     public long QuotaSeconds { get; set; }
+    /// <summary>Subset of observed runtime, never an additional total or quota charge.</summary>
+    public long GraceSeconds { get; set; }
 
     /// <summary>Legacy readable column. Phase 2 policy derives permission from usage and schedule, never this flag.</summary>
     public bool Blocked { get; set; } = false;

@@ -33,18 +33,20 @@ public class DatabaseMigrator
         using var conn = new SqliteConnection(_connectionString);
         conn.Open();
         Execute(conn, "PRAGMA foreign_keys=ON;");
+        Execute(conn, "PRAGMA synchronous=FULL;");
 
         using var versionCommand = conn.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(versionCommand.ExecuteScalar());
-        if (version > 2) throw new InvalidOperationException($"Unsupported database schema version {version}.");
-        if (version == 2) return;
+        if (version > 3) throw new InvalidOperationException($"Unsupported database schema version {version}.");
+        if (version == 3) return;
         // Preserve a consistent pre-upgrade copy of existing ScreenTime profile data.
         using var tablesCommand = conn.CreateCommand();
         tablesCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppRules'";
         if (Convert.ToInt32(tablesCommand.ExecuteScalar()) > 0 && conn.DataSource != ":memory:")
         {
-            foreach (var suffix in version == 0 ? new[] { ".pre-phase2.bak", ".pre-phase3.bak" } : new[] { ".pre-phase3.bak" })
+            foreach (var suffix in version == 0 ? new[] { ".pre-phase2.bak", ".pre-phase3.bak", ".pre-phase4.bak" }
+                : version == 1 ? new[] { ".pre-phase3.bak", ".pre-phase4.bak" } : new[] { ".pre-phase4.bak" })
             {
                 var backupPath = conn.DataSource + suffix;
                 if (!File.Exists(backupPath))
@@ -150,8 +152,39 @@ public class DatabaseMigrator
             PRAGMA user_version=1;
             """);
         }
-        ApplyPhase3(conn, tx);
+        if (version < 2) ApplyPhase3(conn, tx);
+        ApplyPhase4(conn, tx);
         tx.Commit();
+    }
+
+    private static void ApplyPhase4(SqliteConnection conn, SqliteTransaction tx)
+    {
+        const string sql = """
+            ALTER TABLE DailyUsage ADD COLUMN GraceSeconds INTEGER NOT NULL DEFAULT 0 CHECK(typeof(GraceSeconds)='integer' AND GraceSeconds >= 0 AND GraceSeconds <= ObservedSeconds);
+            CREATE TABLE GraceEpisodes (
+                Id TEXT PRIMARY KEY NOT NULL,
+                AppKey TEXT NOT NULL CHECK(length(AppKey)>0 AND AppKey=lower(trim(AppKey)) AND AppKey NOT LIKE '%.exe'),
+                QuotaDate TEXT NOT NULL,
+                StartedAtUtcTicks INTEGER NOT NULL CHECK(typeof(StartedAtUtcTicks)='integer' AND StartedAtUtcTicks>0),
+                ExpiresAtUtcTicks INTEGER NOT NULL CHECK(typeof(ExpiresAtUtcTicks)='integer' AND ExpiresAtUtcTicks>StartedAtUtcTicks),
+                Phase INTEGER NOT NULL CHECK(typeof(Phase)='integer' AND Phase IN (0,1,2)),
+                EndedAtUtcTicks INTEGER,
+                CHECK((Phase=0 AND EndedAtUtcTicks IS NULL) OR (Phase<>0 AND EndedAtUtcTicks IS NOT NULL AND typeof(EndedAtUtcTicks)='integer' AND EndedAtUtcTicks>=StartedAtUtcTicks)),
+                UNIQUE(AppKey,QuotaDate), UNIQUE(Id,AppKey)
+            );
+            CREATE UNIQUE INDEX idx_grace_active_app ON GraceEpisodes(AppKey) WHERE Phase=0;
+            CREATE TABLE GraceProcesses (
+                EpisodeId TEXT NOT NULL, AppKey TEXT NOT NULL,
+                ProcessId INTEGER NOT NULL CHECK(typeof(ProcessId)='integer' AND ProcessId>0),
+                StartTimeUtcTicks INTEGER NOT NULL CHECK(typeof(StartTimeUtcTicks)='integer' AND StartTimeUtcTicks>0),
+                SessionId INTEGER NOT NULL CHECK(typeof(SessionId)='integer' AND SessionId>=0),
+                PRIMARY KEY(EpisodeId,AppKey,ProcessId,StartTimeUtcTicks,SessionId),
+                FOREIGN KEY(EpisodeId,AppKey) REFERENCES GraceEpisodes(Id,AppKey)
+            );
+            PRAGMA user_version=3;
+            """;
+        // Execute each DDL statement separately so any preparation failure aborts the transaction.
+        foreach (var statement in sql.Split(';', StringSplitOptions.RemoveEmptyEntries)) Execute(conn, tx, statement);
     }
 
     private static void ApplyPhase3(SqliteConnection conn, SqliteTransaction tx)
