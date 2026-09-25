@@ -34,7 +34,7 @@ Phases 1–4 are complete, validated, committed and pushed per the owner. Remain
 
 ## Phase 5: gaming-safe notifications (owner accepted; final review pending)
 
-The WPF implementation, receipt model, validation evidence and owner's manual procedure are recorded in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md). Following the initial ten-notice result, the owner passed final refined-notification/full-countdown acceptance during active Apex firing-range gameplay on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`; see [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). This is owner-observed acceptance, not a measured performance guarantee. The minimal preview-label/documentation follow-up awaits final independent review; PR #1 remains unmerged.
+The WPF implementation, receipt model, validation evidence and owner's manual procedure are recorded in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md). Following the initial ten-notice result, the owner passed final refined-notification/full-countdown acceptance during active Apex firing-range gameplay on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`; see [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). This is owner-observed acceptance, not a measured performance guarantee. The minimal preview-label and notification-copy follow-ups await final independent review; PR #1 remains unmerged.
 
 The original interactive/topmost TimeGuard warning caused visible Apex disruption. Gaming-safe notifications are non-negotiable; the precise contribution of focus and rendering remains a measurement question.
 

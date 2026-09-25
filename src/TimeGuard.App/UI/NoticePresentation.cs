@@ -23,13 +23,18 @@ internal static class NoticePresentation
         var minutes = Math.Max(1, (int)Math.Ceiling(remaining.TotalMinutes));
         return request.Kind switch
         {
-            NotificationKind.GraceFinalMinute => $"{name} will close at {request.GraceDeadlineUtc!.Value.ToLocalTime():HH:mm:ss}.\nFinish your current game now.",
-            NotificationKind.GraceStarted or NotificationKind.GraceFiveMinutes =>
-                $"{name}: daily quota exhausted. Finish your current game.\nThe app will close in {minutes} minute{(minutes == 1 ? "" : "s")} ({request.GraceDeadlineUtc!.Value.ToLocalTime():HH:mm:ss}). New launches are not allowed.",
-            NotificationKind.Blocked => $"{name}: launch blocked. " +
-                (request.Reason.HasFlag(PolicyReason.Downtime) ? "Downtime is active." : "Daily quota is exhausted.") +
-                (request.NextAvailabilityUtc is { } available ? $" Next availability: {available.ToLocalTime():ddd HH:mm}." : ""),
-            _ => $"{name}: about {minutes} minutes of daily quota remaining."
+            NotificationKind.GraceFinalMinute =>
+                $"{name} has less than a minute left in the current session. This session will end at {request.GraceDeadlineUtc!.Value.ToLocalTime():T}.",
+            NotificationKind.GraceStarted =>
+                $"{name} has reached its daily limit. Finish your current session. This session will end in {minutes} minutes at {request.GraceDeadlineUtc!.Value.ToLocalTime():T}. New sessions are not allowed.",
+            NotificationKind.GraceFiveMinutes =>
+                $"{name} has 5 minutes left in the current session. This session will end at {request.GraceDeadlineUtc!.Value.ToLocalTime():T}. New sessions are not allowed.",
+            NotificationKind.Blocked when request.Reason.HasFlag(PolicyReason.Downtime) =>
+                $"{name} is unavailable during downtime." +
+                (request.NextAvailabilityUtc is { } available ? $" Next availability is {available.ToLocalTime():f}." : ""),
+            NotificationKind.Blocked => $"{name} has reached its daily limit and cannot be opened again today.",
+            NotificationKind.QuotaFiveMinutes => $"{name} has about 5 minutes of daily time remaining.",
+            _ => $"{name} has about {minutes} minutes of daily time remaining."
         };
     }
 }

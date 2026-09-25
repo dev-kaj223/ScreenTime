@@ -1,6 +1,6 @@
 # Phase 5: passive gaming notices
 
-Phase 5 only, on owner-requested `phase5-gaming-safe-notifications`, based on `screentime-dev` at `6737bae3a714bd9c971bb6a160b5d47c2eeda90e`. The task explicitly stops with an open PR for independent review; it does not authorize merging. The owner passed final refined-notification/full-countdown acceptance during active Apex firing-range gameplay on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`. See [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). The only subsequent executable change replaces the preview's synthetic label with `Example App`; production `DisplayName` identification and all notification/enforcement behavior remain unchanged. Final independent review of this label/documentation follow-up is pending.
+Phase 5 only, on owner-requested `phase5-gaming-safe-notifications`, based on `screentime-dev` at `6737bae3a714bd9c971bb6a160b5d47c2eeda90e`. The task explicitly stops with an open PR for independent review; it does not authorize merging. The owner passed final refined-notification/full-countdown acceptance during active Apex firing-range gameplay on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`. See [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). Subsequent owner-approved wording changes use `Example App` in the preview and sentence-style application identification with general session terminology in notification bodies. Timing, styles, sizing, colors, branding behavior, input/focus handling, countdown, persistence and enforcement remain unchanged. Final independent review is pending.
 
 ## Implementation and authority
 
@@ -46,7 +46,28 @@ The owner also approved Phase 6 notification presets/preferences in [D21](DECISI
 
 ## Tests and current evidence
 
-Final preview-label follow-up after owner acceptance on `eca318e`: the sole executable edit is `StartNoticePreview`'s synthetic `DisplayName` (`ScreenTime preview` → `Example App`). No production body formatter, styles, native handling, timers, Core, storage, enforcement or tests changed. Focused validation:
+The latest owner-approved copy uses the configured `DisplayName` as part of each sentence, never an `AppName:` prefix, and uses **session**, not game. Headings and the large live countdown remain unchanged. Deadline text uses the original deadline converted to local time with the current culture's long-time pattern (`T`, retaining seconds); downtime availability uses local full-date/short-time formatting (`f`). The existing long-name abbreviation, numeric remaining-time calculation and sizing/wrapping behavior are unchanged.
+
+| Heading | Approved body |
+|---|---|
+| TIME REMAINING | `{DisplayName} has about {N} minutes of daily time remaining.` |
+| 5 MINUTES LEFT | `{DisplayName} has about 5 minutes of daily time remaining.` |
+| FINISH YOUR SESSION | `{DisplayName} has reached its daily limit. Finish your current session. This session will end in {N} minutes at {deadline}. New sessions are not allowed.` |
+| FINAL WARNING | `{DisplayName} has 5 minutes left in the current session. This session will end at {deadline}. New sessions are not allowed.` |
+| FINAL MINUTE | `{DisplayName} has less than a minute left in the current session. This session will end at {deadline}.` |
+| TIME EXPIRED | `{DisplayName} has reached its daily limit and cannot be opened again today.` |
+| APP BLOCKED | `{DisplayName} is unavailable during downtime.` Append `Next availability is {friendly date/time}.` only when known. |
+
+The fixed five-minute milestone wording is owner-approved; recovery/grace-start remaining time and the persisted local stop time still come from the existing request facts. No notification trigger/state or timing policy changed. Current copy tests assert complete sentences with both a game and an ordinary application name, US/UK local-time formatting, unchanged headings, and downtime availability present/absent. This copy follow-up is distinct from the earlier owner-tested head and label-only validation below.
+
+Sentence-copy validation (local artifacts: `tests/TimeGuard.Tests/bin/Phase5SentenceCopy/`):
+
+- `dotnet build TimeGuard.sln --no-restore --no-incremental -c Release`: passed, zero errors, baseline DashboardWindow CS0618 only.
+- `dotnet test tests/TimeGuard.Tests/TimeGuard.Tests.csproj --no-build -c Release --filter FullyQualifiedName~Notification --logger trx`: **21 passed, zero failed/skipped**, including receipt-contention and original-deadline/error-ordering coverage.
+- `dotnet test tests/TimeGuard.UITests/TimeGuard.UITests.csproj --no-build -c Release --filter 'FullyQualifiedName~NoticePresentationTests|FullyQualifiedName~NotificationWindowTests' --logger trx`: **11 presentation/copy tests passed; one native probe failed** at its unchanged helper-foreground precondition before any notice was displayed. A serialized native-only retry reproduced that precondition failure. These attempts provide no new native-input or rendered-notice evidence; no activation code or precondition was changed to make them pass. Desktop readiness was requested for a later native rerun.
+- Documentation file links, preview-script syntax and whitespace checks passed. All three installed TimeGuard file paths/hashes and seven HKCU Run values were unchanged. No new Apex run, complete local suite or final native pass is claimed for the copy-only change.
+
+Historical preview-label follow-up `e7361ea` after owner acceptance on `eca318e`: its sole executable edit was `StartNoticePreview`'s synthetic `DisplayName` (`ScreenTime preview` → `Example App`). That revision did not change the production body formatter, styles, native handling, timers, Core, storage, enforcement or tests. Focused validation at that revision:
 
 - `dotnet build TimeGuard.sln --no-restore --no-incremental -c Release`: passed, zero errors, baseline DashboardWindow CS0618 only.
 - `dotnet test tests/TimeGuard.UITests/TimeGuard.UITests.csproj --no-build -c Release --filter 'FullyQualifiedName~NoticePresentationTests|FullyQualifiedName~NotificationWindowTests' --logger trx --results-directory tests/TimeGuard.Tests/bin/Phase5PreviewLabel/UI`: **10 passed, zero failed/skipped**, 1m36s on the interactive desktop. Existing application-name body assertions and six-state native input/countdown checks remain unchanged. Inspected the captured preview: Example App appears beneath ScreenTime branding.
@@ -107,7 +128,7 @@ For that receipt remediation, no production WPF/native activation code or UI-tes
 
 ## Owner's manual Apex acceptance procedure
 
-The [independent re-review of `67237e3`](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5310527969) resolved R1. The subsequent [independent review of `eca318e`](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5312071076) found no blocking code issues in the refined presentation/countdown, leaving only final owner acceptance open. The owner has now passed that firing-range acceptance on the same head, as detailed in [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). The minimal preview-label/documentation follow-up still requires final independent review; none of these steps authorizes merging.
+The [independent re-review of `67237e3`](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5310527969) resolved R1. The subsequent [independent review of `eca318e`](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5312071076) found no blocking code issues in the refined presentation/countdown, leaving only final owner acceptance open. The owner has now passed that firing-range acceptance on the same head, as detailed in [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). The minimal preview-wording/documentation follow-up still requires final independent review; none of these steps authorizes merging.
 
 **Prerequisite:** clean helper/input validation on an unlocked interactive desktop. No automated WPF result establishes Apex safety. Preserve the installed TimeGuard profile/process/startup state. If another enforcer is already targeting Apex, coordinate that separately; this task does not authorize stopping it. This test must never exercise destructive enforcement against Apex.
 

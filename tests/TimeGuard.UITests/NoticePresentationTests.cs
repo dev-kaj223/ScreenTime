@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using System.Globalization;
 using TimeGuard.Models;
 using TimeGuard.UI;
 using Xunit;
@@ -84,20 +85,48 @@ public class NoticePresentationTests
     }
 
     [Theory]
-    [InlineData(NotificationKind.QuotaTenMinutes, "TIME REMAINING")]
-    [InlineData(NotificationKind.QuotaFiveMinutes, "5 MINUTES LEFT")]
-    [InlineData(NotificationKind.GraceStarted, "FINISH YOUR SESSION")]
-    [InlineData(NotificationKind.GraceFiveMinutes, "FINAL WARNING")]
-    [InlineData(NotificationKind.GraceFinalMinute, "FINAL MINUTE")]
-    [InlineData(NotificationKind.Blocked, "TIME EXPIRED")]
-    public void Urgency_UsesTextAsWellAsColor_AndNormalCaseBody(NotificationKind kind, string heading)
+    [InlineData(NotificationKind.QuotaTenMinutes, 540, "TIME REMAINING", "{0} has about 9 minutes of daily time remaining.")]
+    [InlineData(NotificationKind.QuotaFiveMinutes, 300, "5 MINUTES LEFT", "{0} has about 5 minutes of daily time remaining.")]
+    [InlineData(NotificationKind.GraceStarted, 1020, "FINISH YOUR SESSION", "{0} has reached its daily limit. Finish your current session. This session will end in 17 minutes at {1}. New sessions are not allowed.")]
+    [InlineData(NotificationKind.GraceFiveMinutes, 300, "FINAL WARNING", "{0} has 5 minutes left in the current session. This session will end at {1}. New sessions are not allowed.")]
+    [InlineData(NotificationKind.GraceFinalMinute, 60, "FINAL MINUTE", "{0} has less than a minute left in the current session. This session will end at {1}.")]
+    [InlineData(NotificationKind.Blocked, 0, "TIME EXPIRED", "{0} has reached its daily limit and cannot be opened again today.")]
+    public void Urgency_UsesApprovedSentenceCopy_DynamicAppName_AndLocalTime(NotificationKind kind, int seconds, string heading, string template)
     {
-        var request = Request(kind, DateTimeOffset.UtcNow);
-        Assert.Equal(heading, NoticePresentation.Style(request).Heading);
-        var body = NoticePresentation.Body(request, request.CreatedAtUtc);
-        Assert.NotEqual(body.ToUpperInvariant(), body);
-        Assert.Contains("Helper", body);
-        Assert.Equal("APP BLOCKED", NoticePresentation.Style(request with { Kind = NotificationKind.Blocked, Reason = PolicyReason.Downtime }).Heading);
+        var originalCulture = CultureInfo.CurrentCulture;
+        try
+        {
+            foreach (var culture in new[] { "en-US", "en-GB" })
+            foreach (var name in new[] { "Apex Legends", "Example Editor" })
+            {
+                CultureInfo.CurrentCulture = CultureInfo.GetCultureInfo(culture);
+                var request = Request(kind, new DateTimeOffset(2026, 9, 24, 20, 0, 23, TimeSpan.Zero), seconds) with
+                    { DisplayName = name, NextAvailabilityUtc = DateTimeOffset.UtcNow.AddDays(1) };
+                Assert.Equal(heading, NoticePresentation.Style(request).Heading);
+                var body = NoticePresentation.Body(request, request.CreatedAtUtc);
+                Assert.Equal(string.Format(template, name, request.GraceDeadlineUtc!.Value.ToLocalTime().ToString("T")), body);
+                Assert.DoesNotContain(name + ":", body);
+                Assert.DoesNotContain("game", body);
+                Assert.NotEqual(body.ToUpperInvariant(), body);
+            }
+        }
+        finally { CultureInfo.CurrentCulture = originalCulture; }
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void DowntimeCopy_UsesAppName_AndOnlyKnownFriendlyLocalAvailability(bool knownAvailability)
+    {
+        var request = Request(NotificationKind.Blocked, DateTimeOffset.UtcNow) with
+        {
+            DisplayName = "Example Editor", Reason = PolicyReason.Downtime | PolicyReason.DailyQuotaExhausted,
+            NextAvailabilityUtc = knownAvailability ? new DateTimeOffset(2026, 9, 25, 17, 30, 0, TimeSpan.Zero) : null
+        };
+        Assert.Equal("APP BLOCKED", NoticePresentation.Style(request).Heading);
+        Assert.Equal("Example Editor is unavailable during downtime." +
+            (knownAvailability ? $" Next availability is {request.NextAvailabilityUtc!.Value.ToLocalTime():f}." : ""),
+            NoticePresentation.Body(request, request.CreatedAtUtc));
     }
 
     private sealed class DisplayClock : TimeProvider

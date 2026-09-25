@@ -1,6 +1,6 @@
 # Phase 5 owner acceptance record
 
-**Status: final owner refined-presentation/countdown Apex firing-range acceptance PASS on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`.** Only the requested preview-label/documentation follow-up awaits final independent review. Keep PR #1 unmerged. Use the notice-only preview and commands in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md#owners-manual-apex-acceptance-procedure); it starts no monitor or enforcement. No destructive Apex enforcement or ranked testing is authorized.
+**Status: final owner refined-presentation/countdown Apex firing-range acceptance PASS on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`.** The requested preview-label and notification-copy follow-ups await final independent review. Keep PR #1 unmerged. Use the notice-only preview and commands in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md#owners-manual-apex-acceptance-procedure); it starts no monitor or enforcement. No destructive Apex enforcement or ranked testing is authorized.
 
 ## Final owner acceptance on reviewed head `eca318e`
 
@@ -15,7 +15,7 @@ The owner reports that refined notifications and the **full final-minute live co
 
 This completes the owner's refined-presentation/countdown firing-range acceptance. These are owner observations, not instrumented FPS/frametime measurements or claims about additional display configurations. The exact tested head is supplied; hardware details, raw HWND logs and per-notice measurements were not supplied. No non-ranked match, ranked run or destructive enforcement is inferred.
 
-The sole requested follow-up replaces the preview's synthetic `DisplayName` of `ScreenTime preview` with **`Example App`**, avoiding repetition beneath the brand/logo. Production bodies continue to identify the affected application through `DisplayName` (for example, Apex Legends). Behavior, styling, native input/focus handling, countdown timing and enforcement separation are unchanged. Owner gameplay acceptance above applies to the explicitly tested head; the minimal follow-up receives focused automated validation and final independent review.
+The first requested follow-up replaced the preview's synthetic `DisplayName` of `ScreenTime preview` with **`Example App`**, avoiding repetition beneath the brand/logo. A subsequent owner-approved copy-only refinement uses sentence-style `DisplayName` identification and general **session** terminology in all notification bodies; the approved copy is recorded in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md#tests-and-current-evidence). Behavior, styling, sizing, branding resource behavior, native input/focus handling, countdown timing, persistence and enforcement separation are unchanged. Owner gameplay acceptance above applies to the explicitly tested head; wording follow-ups receive focused automated validation and final independent review, not a fabricated new gameplay run.
 
 ## Owner observations received 2026-09-24
 
@@ -58,6 +58,6 @@ Any reproducible focus, input, fullscreen or rendering regression stops acceptan
 
 - Previous five-notice presentation, owner functional firing-range result: **PASS as observed above**
 - Refined presentation/countdown, owner visual and final firing-range sign-off: **PASS on `eca318e`**
-- Final independent review of acceptance evidence and minimal preview-label follow-up: **PENDING**
+- Final independent review of acceptance evidence and minimal wording follow-ups: **PENDING**
 - Normal non-ranked testing, only after training passes: **NOT RUN**
 - Ranked: **later explicit gate; NOT RUN**
