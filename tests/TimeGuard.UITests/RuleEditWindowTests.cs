@@ -6,10 +6,10 @@ using Xunit;
 namespace TimeGuard.UITests;
 
 /// <summary>Actual protected Settings → rule editor → SQLite save/reload paths.</summary>
-public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
+public class RuleEditWindowTests : IDisposable
 {
-    private readonly SeededAppFixture _fx;
-    public RuleEditWindowTests(SeededAppFixture fx) => _fx = fx;
+    private readonly SeededAppFixture _fx = new();
+    public void Dispose() => _fx.Dispose();
 
     private Window OpenSettingsWindow()
     {
@@ -69,6 +69,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.Null(editor.FindFirstDescendant(cf => cf.ByAutomationId("BreakEveryBox")));
         Assert.Null(editor.FindFirstDescendant(cf => cf.ByAutomationId("BreakDurationBox")));
         Assert.Null(editor.FindTextContaining("Break Schedule"));
+        editor.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "beta2-daily-editor.png"));
         editor.FindButton("Save").Invoke();
         var saved = Saved("editor-seven-days");
         for (var i = 0; i < days.Length; i++) Assert.Equal(i * 67, saved.GetScheduleForDay(days[i]).DailyLimitMinutes);
@@ -111,6 +112,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Days(editor, DayOfWeek.Friday); Clock(editor, "Start", 12, 0, "PM"); Clock(editor, "End", 1, 0, "PM"); NextDay(editor, false);
         editor.FindButton("AddPeriodButton").Invoke(); AssertGroupCount(editor, 3);
         Periods(editor).Items[2].Select(); editor.FindButton("RemovePeriodButton").Invoke(); AssertGroupCount(editor, 2);
+        editor.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "beta2-downtime-editor.png"));
         editor.FindButton("Save").Invoke();
         var saved = Saved("editor-groups");
         Assert.Equal(3, saved.BlockedPeriods.Count);

@@ -21,7 +21,11 @@ public static class WindowHelpers
         {
             try
             {
-                var windows = app.GetAllTopLevelWindows(automation);
+                var roots = app.GetAllTopLevelWindows(automation);
+                // Owned modal editors belong to the fixture process but can be nested in UIA.
+                var windows = roots.Concat(roots.SelectMany(w => w.FindAllDescendants(cf =>
+                    cf.ByControlType(FlaUI.Core.Definitions.ControlType.Window))).Select(e => e.AsWindow()))
+                    .Where(w => w.Properties.ProcessId.ValueOrDefault == app.ProcessId);
                 var match = windows.FirstOrDefault(w =>
                     w.Title?.Contains(titleContains, StringComparison.OrdinalIgnoreCase) == true);
                 if (match is not null)

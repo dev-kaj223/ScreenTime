@@ -5,6 +5,9 @@ This compact ledger records accepted choices, not a new product proposal. [PRODU
 
 Phase 8 is integrated by normal merge `0224f432b65095db4dee59522173ec0267f3e0cb` (PR #4). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/4#pullrequestreview-5318740660) cleared `6b48ac4`, closing H8/P8-G1 with approved B artwork, full author Core 218/UI 69, fresh reviewer Core 218/affected UI 6, CI and preservation evidence. The historical [Phase 8 report](PHASE8_IMPLEMENTATION.md) retains writing-time limits. A subsequent integration-CI timing assertion failure is tracked as [Phase 9 validation follow-up P9-V1](https://github.com/dev-kaj223/ScreenTime/pull/4#issuecomment-5834049344), not erased from prior history.
 
+
+Phase 9 is integrated by normal merge `2d2b6e6c6eb365a11df99b7094599f3d342a39b1` (PR #5). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/5#pullrequestreview-5319247623) cleared the reviewed package/reproducibility corrections. Historical phase reports retain their writing-time status and limitations.
+
 ## Authority and phase status
 
 The owner confirmed on 2026-09-24 that Phases 1–4 are complete, validated, committed and pushed. Local history ends at `3b1dbec` (Phase 4), following `90f7538` (Phase 3), `d57ffcd` (Phase 2) and the Phase 1 commits. Original report statements such as “no commit or push” describe their writing time. Preserve those documents and history; do not manufacture later test results or erase their stated limitations.
@@ -70,3 +73,13 @@ Phase 9 implements the owner objective and architecture section 4: packaging del
 ## Historical validation limits to preserve
 
 The Phase 4 report records 174 passing Core tests, four passing rebuilt helper scenarios and a passing real 20-minute helper check. It also records blocked interactive UI validation caused by denied desktop input; physical sleep/hibernate and real-calendar midnight were not claimed. These are historical observations, not permission to skip future gates or to overturn the owner's phase-completion statement. Each future PR must supply its own current validation evidence. D18 records final owner-observed Phase 5 firing-range acceptance on the named head; the final review is linked above. Phase 6 supplies its own tray validation and any reviewer-required physical gates.
+
+### D25 — Beta 2 owner UX refinements (2026-09-25)
+
+After testing the exact Beta 1 production package, the owner reported smooth background operation, acceptable resource use, no meaningful observed gaming/FPS regression, correct downtime enforcement, and acceptable passive notices. These are owner observations, not new instrumented performance evidence or authority to change enforcement.
+
+The owner authorizes v0.1.0-beta.2 from current `screentime-dev`, using `codex/beta-2-ux` and the established independent-review/CI/normal-merge workflow. This supersedes phase-number-only branch wording for this request. Preserve Beta 1 draft/artifacts unchanged; Beta 2 ends as an unsigned draft prerelease after review and any justified manual gate, never public publication.
+
+Successful first-run password creation immediately opens initial configuration without another challenge; subsequent Settings and Exit commands authenticate normally. Left tray click opens/activates one password-free read-only Dashboard. Right click toggles an interactive temporary frameless status popup: no taskbar entry/X/drag, click-away/Escape dismissal, bounded monitor work-area placement, direct truthful per-app downtime/availability/grace facts, and Dashboard/Settings/Exit footer. Closing either view leaves monitoring running.
+
+All user-facing schedule/deadline/availability times use explicit 12-hour AM/PM. Daily limits use hours/minutes (0h0m Unlimited); downtime uses multiple weekdays plus hour/minute/AM-PM controls and explicit next-day support, preserving normalized policy and all existing interval/DST behavior. Hide deferred breaks and aggregate cap controls while preserving stored legacy fields. Dashboard gains bounded Today per-app facts and an improved existing seven-day chart/intentional empty state; broad analytics and unrelated-app history remain deferred. Preserve accepted passive notices, filled-base branding, independent-app policy, exact-instance enforcement, durable original grace deadlines, accounting and production/TimeGuard isolation.

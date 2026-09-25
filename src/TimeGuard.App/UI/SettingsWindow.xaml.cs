@@ -15,19 +15,21 @@ public partial class SettingsWindow : Window
     private readonly DatabaseService _db;
     private readonly RuntimeOptions _runtime;
     private readonly NotificationPreferenceStore _preferences;
+    private readonly Action? _openDashboard;
     private ObservableCollection<AppRule> _rules = [];
 
     private record UsageRow(string ProcessName, string UsageMinutesDisplay, bool Blocked);
 
-    internal SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null)
+    internal SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null, Action? openDashboard = null)
     {
         InitializeComponent();
         _db = db;
+        _openDashboard = openDashboard;
         _runtime = runtime ?? RuntimeOptions.Development();
         _preferences = new NotificationPreferenceStore(_runtime.Paths);
         LoadRules();
         LoadUsage();
-        LoadGlobalCap();
+
         NotificationEditor.Load(_preferences.Load());
         StartupCheckBox.IsEnabled = _runtime.AllowsStartup;
         StartupCheckBox.IsChecked = StartupHelper.IsRegistered(_runtime);
@@ -47,10 +49,15 @@ public partial class SettingsWindow : Window
     {
         RecentPanel.Children.Clear();
 
-        // Always show at least a test entry so the UI can be verified
-        var items = recent.Count > 0 ? recent : new[] { "[test] no-recent-sessions" };
+        if (recent.Count == 0)
+        {
+            RecentPanel.Children.Add(new System.Windows.Controls.TextBlock
+            { Text = "No recent applications. Use Add Rule or Pick Process to get started.",
+                Foreground = (System.Windows.Media.Brush)FindResource("SubtextBrush"), TextWrapping = TextWrapping.Wrap });
+            return;
+        }
 
-        foreach (var proc in items)
+        foreach (var proc in recent)
         {
             var row = new System.Windows.Controls.Grid();
             row.ColumnDefinitions.Add(new System.Windows.Controls.ColumnDefinition
@@ -77,7 +84,6 @@ public partial class SettingsWindow : Window
             };
             btn.Click += (_, _) =>
             {
-                if (captured.StartsWith("[test]")) return;
                 PromoteProcess(captured);
             };
             System.Windows.Controls.Grid.SetColumn(btn, 1);
@@ -108,7 +114,7 @@ public partial class SettingsWindow : Window
 
     private void OnAddRule(object sender, RoutedEventArgs e)
     {
-        var dialog = new RuleEditWindow(new AppRule());
+        var dialog = new RuleEditWindow(new AppRule()) { Owner = this };
         if (dialog.ShowDialog() == true && dialog.Result is not null)
         {
             SaveRuleWithFeedback(dialog.Result);
@@ -119,7 +125,7 @@ public partial class SettingsWindow : Window
     private void OnEditRule(object sender, RoutedEventArgs e)
     {
         if (RulesGrid.SelectedItem is not AppRule selected) return;
-        var dialog = new RuleEditWindow(selected);
+        var dialog = new RuleEditWindow(selected) { Owner = this };
         if (dialog.ShowDialog() == true && dialog.Result is not null)
         {
             dialog.Result.Id = selected.Id;
@@ -162,7 +168,7 @@ public partial class SettingsWindow : Window
                 DisplayName = picker.SelectedProcess,
                 Enabled = true
             };
-            var dialog = new RuleEditWindow(rule);
+            var dialog = new RuleEditWindow(rule) { Owner = this };
             if (dialog.ShowDialog() == true && dialog.Result is not null)
             {
                 SaveRuleWithFeedback(dialog.Result);
@@ -173,7 +179,8 @@ public partial class SettingsWindow : Window
 
     private void OnViewDashboard(object sender, RoutedEventArgs e)
     {
-        new DashboardWindow(_db).ShowDialog();
+        Close();
+        if (_openDashboard is not null) Dispatcher.BeginInvoke(_openDashboard);
     }
 
     private void SaveRuleWithFeedback(AppRule rule)
@@ -205,13 +212,6 @@ public partial class SettingsWindow : Window
                 !engine.Evaluate(PolicySnapshot.Capture(rule, log, now, false, evaluator,
                     date => _db.LoadLog(date).Entries.FirstOrDefault(u => u.ProcessName == e.ProcessName)?.QuotaSeconds ?? 0)).MayLaunch))
             .ToList();
-    }
-
-    // ── Global Cap Tab ────────────────────────────────────────────────────────
-
-    private void LoadGlobalCap()
-    {
-        OverallCapBox.Text = _db.GetSetting("OverallDailyLimitMinutes") ?? "0";
     }
 
     // ── Security Tab ─────────────────────────────────────────────────────────
@@ -256,9 +256,6 @@ public partial class SettingsWindow : Window
             WpfMessageBox.Show(this, ex.Message, "Notification preferences", MessageBoxButton.OK);
             return;
         }
-        if (int.TryParse(OverallCapBox.Text, out var cap) && cap.ToString() != (_db.GetSetting("OverallDailyLimitMinutes") ?? "0"))
-            _db.SetSetting("OverallDailyLimitMinutes", cap.ToString());
-
         DialogResult = true;
         Close();
     }

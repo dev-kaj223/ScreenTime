@@ -1,6 +1,7 @@
 using System.ComponentModel;
 using System.Collections.ObjectModel;
 using TimeGuard.Models;
+using TimeGuard.UI;
 
 namespace TimeGuard.ViewModels;
 
@@ -31,7 +32,7 @@ internal sealed class StatusViewModel : INotifyPropertyChanged
             else if (old != index) Apps.Move(old, index);
         }
         Summary = snapshot is null ? "Waiting for the first observation…" : Apps.Count == 0 ?
-            "No enabled applications configured" : $"Observed {snapshot.ObservedAtUtc.ToLocalTime():T} · Availability assumes no further use";
+            "No enabled applications configured" : $"Observed {DisplayTime.Clock(snapshot.ObservedAtUtc)} · Availability assumes no further use";
         var tooltip = snapshot is null ? "ScreenTime — Starting" : Apps.Count switch
         {
             0 => "ScreenTime — No apps configured",
@@ -64,20 +65,26 @@ internal sealed class AppStatusRow : INotifyPropertyChanged
         _status.Facts.Downtime.IsActive ? "DOWNTIME" : Restricted ? "DAILY LIMIT REACHED" : "AVAILABLE";
     public string Accent => HasGrace ? "#F4AD72" : Restricted ? "#FF9999" : "#9FC8F4";
     public string Running => _status.Facts.IsRunning ? "Running at last observation" : "Not observed running";
-    public string Usage => $"Used {Duration(_status.Facts.QuotaSeconds)} / {(_status.Facts.DailyLimitMinutes == 0 ? "Unlimited" : Duration(_status.Facts.DailyLimitMinutes * 60L))} daily allowance";
+    public string Usage => $"{Duration(_status.Facts.QuotaSeconds)} used / {(_status.Facts.DailyLimitMinutes == 0 ? "Unlimited" : Duration(_status.Facts.DailyLimitMinutes * 60L))}";
     public string Remaining => RemainingSeconds is { } seconds ? $"{Duration(seconds)} remaining{(Restricted ? " · unavailable for new sessions" : "")}" :
         $"Unlimited allowance{(Restricted ? " · unavailable for new sessions" : "")}";
     public string Observed => $"Observed today: {Duration(_status.ObservedSeconds)} · includes {Duration(_status.GraceSeconds)} in grace";
     public string GraceCountdown => _status.Decision.Grace is { } grace ?
         $"{Math.Max(0, (int)Math.Ceiling((grace.ExpiresAtUtc - _now).TotalSeconds)) / 60}:{Math.Max(0, (int)Math.Ceiling((grace.ExpiresAtUtc - _now).TotalSeconds)) % 60:00} remaining" : "";
     public string GraceDetail => _status.Decision.Grace is { } grace ?
-        $"Daily limit reached · New sessions are blocked\nSession ends at {grace.ExpiresAtUtc.ToLocalTime():T}" : "";
+        $"Daily limit reached · New sessions are blocked\nEnds at {DisplayTime.Clock(grace.ExpiresAtUtc)}" : "";
     public string Downtime => _status.Facts.Downtime.IsActive ? "Downtime active" : "Downtime inactive";
     public string Quota => _status.Decision.Reasons.HasFlag(PolicyReason.DailyQuotaExhausted) ? "Daily quota exhausted" : "Daily quota available";
     public string NextDowntime => $"Next downtime: {Format(_status.Decision.NextDowntimeStart, "None scheduled")}";
     public string NextAvailability => $"New-session availability: {(HasGrace && _status.Decision.NextAvailability <= _now ? "After this session ends, subject to current policy" : Format(_status.Decision.NextAvailability, "None scheduled"))}";
+    public string Primary => HasGrace ? GraceCountdown : _status.Facts.Downtime.IsActive ?
+        $"Downtime until {Format(_status.Facts.Downtime.CurrentEnd, "time unknown")}" : Restricted ?
+        (_status.Decision.NextAvailability is { } next && next > _now ? $"Available {DisplayTime.Availability(next, _now)}" : "Next availability unknown") : Remaining;
+    public string Secondary => HasGrace ? GraceDetail : Restricted ?
+        (_status.Decision.NextAvailability is { } next && next > _now ? $"Available in {DisplayTime.Until(next, _now)}" : "Next availability unknown") : Usage;
+    public string Upcoming => !HasGrace && !Restricted ? NextDowntime : "";
     public string TooltipStatus => HasGrace ? $"Finish session · {Math.Max(0, Math.Ceiling((_status.Decision.Grace!.ExpiresAtUtc - _now).TotalMinutes))} min remaining" : Restricted ? State.ToLowerInvariant() :
         RemainingSeconds is { } s ? $"{Math.Ceiling(s / 60d):0} min remaining" : "Unlimited";
-    private static string Format(DateTimeOffset? value, string missing) => value?.ToLocalTime().ToString("g") ?? missing;
-    private static string Duration(long seconds) => $"{seconds / 60}m {seconds % 60:00}s";
+    private string Format(DateTimeOffset? value, string missing) => value is { } instant ? DisplayTime.Availability(instant, _now) : missing;
+    private static string Duration(long seconds) => DisplayTime.Duration(seconds);
 }

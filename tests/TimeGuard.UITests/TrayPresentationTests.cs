@@ -29,8 +29,8 @@ public class TrayPresentationTests
         var model = new StatusViewModel();
         model.Refresh(new(Now, [Status("Apex Legends", used: 1080)]), Now);
         Assert.Equal("ScreenTime — Apex Legends: 42 min remaining", model.Tooltip);
-        Assert.Contains("18m 00s / 60m 00s", model.Apps[0].Usage);
-        Assert.Contains("42m 00s remaining", model.Apps[0].Remaining);
+        Assert.Contains("18 min used / 1 hr", model.Apps[0].Usage);
+        Assert.Contains("42 min remaining", model.Apps[0].Remaining);
         var rowIdentity = model.Apps[0];
         model.Refresh(new(Now, [Status("Apex Legends", used: 1081)]), Now.AddSeconds(1));
         Assert.Same(rowIdentity, model.Apps[0]);
@@ -97,7 +97,7 @@ public class TrayPresentationTests
             Assert.Equal(ScrollBarVisibility.Auto, scroll.VerticalScrollBarVisibility);
             Assert.True(scroll.MaxHeight <= 520); Assert.True(panel.MaxHeight <= 650);
             Assert.Equal(12, ((ItemsControl)panel.FindName("AppList")).Items.Count);
-            Assert.False(panel.ShowActivated);
+            Assert.True(panel.ShowActivated); Assert.Equal(WindowStyle.None, panel.WindowStyle); Assert.False(panel.ShowInTaskbar);
             panel.Close();
             var protectedCalls = 0;
             var tray = new TrayIconService(() => new(Now, rows), () => protectedCalls++, () => { protectedCalls++; return Task.CompletedTask; }, brand);
@@ -112,8 +112,8 @@ public class TrayPresentationTests
             SendMessage(nativeWindow.Handle, RegisterWindowMessage("TaskbarCreated"), IntPtr.Zero, IntPtr.Zero);
             Assert.True(nativeIcon.Visible);
             Assert.True((bool)fields.Single(f => f.Name.Equals("_added", StringComparison.OrdinalIgnoreCase)).GetValue(nativeIcon)!);
-            tray.OpenStatus(); Assert.Same(first, tray.Panel);
-            first!.Close(); Assert.Null(tray.Panel); Assert.False(tray.IsDisposed);
+            tray.OpenStatus(); Assert.Null(tray.Panel);
+            Assert.False(tray.IsDisposed);
             tray.OpenStatus(); Assert.NotSame(first, tray.Panel);
             tray.Dispose(); tray.Dispose(); Assert.True(tray.IsDisposed); Assert.Null(tray.Panel);
             Assert.Equal(0, protectedCalls);

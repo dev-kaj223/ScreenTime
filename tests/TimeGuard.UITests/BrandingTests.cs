@@ -21,6 +21,14 @@ namespace TimeGuard.UITests;
 
 public class BrandingTests
 {
+    private sealed class BrandingFixture : SeededAppFixture
+    {
+        protected override void SeedDatabase()
+        {
+            base.SeedDatabase();
+            OpenDatabase().SaveRule(new() { ProcessName = "branding-" + Runtime.RunId, DisplayName = "Brand fixture " + Runtime.RunId[..8], DailyLimitMinutes = 60 });
+        }
+    }
     [Fact]
     public void ExecutableAndAssembly_UseScreenTimeMetadata_AndEmbeddedIcon()
     {
@@ -97,7 +105,7 @@ public class BrandingTests
     [Fact]
     public void FinalBranding_ActualTrayStatusProtectedAccessAndSettingsSurfaces()
     {
-        using var fixture = new SeededAppFixture();
+        using var fixture = new BrandingFixture();
         CaptureShellIcon(fixture, taskbar: false);
         using (var signal = EventWaitHandle.OpenExisting(fixture.Runtime.StatusEventName)) signal.Set();
         var status = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime");
@@ -142,9 +150,12 @@ public class BrandingTests
         var appId = "Appid: " + Path.Combine(AppContext.BaseDirectory, "App", "ScreenTime.exe");
         FlaUI.Core.AutomationElements.AutomationElement[] ShellRoots() => desktop.FindAllChildren()
             .Where(e => e.Properties.ClassName.ValueOrDefault is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland").ToArray();
+        var rules = fixture.OpenDatabase().GetRules().Where(r => r.Enabled).ToArray();
+        var expectedTrayName = rules.Length == 1 ? $"ScreenTime — {rules[0].DisplayName}: 60 min remaining" : "ScreenTime — No apps configured";
         FlaUI.Core.AutomationElements.AutomationElement? FindIcon() => ShellRoots()
-            .SelectMany(e => e.FindAllDescendants()).FirstOrDefault(e =>
-                (taskbar ? e.Properties.AutomationId.ValueOrDefault == appId : Name(e).StartsWith("ScreenTime —", StringComparison.Ordinal)) && Visible(e));
+            .SelectMany(e => e.FindAllDescendants()).SingleOrDefault(e =>
+                (taskbar ? e.Properties.AutomationId.ValueOrDefault == appId : Name(e).EndsWith(expectedTrayName, StringComparison.Ordinal)) && Visible(e));
+        Thread.Sleep(5500); // Wait for this fixture's first committed tooltip refresh.
         var icon = FindIcon(); FlaUI.Core.AutomationElements.Button? overflowToggle = null;
         try
         {

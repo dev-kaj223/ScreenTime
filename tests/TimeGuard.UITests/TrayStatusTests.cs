@@ -9,7 +9,7 @@ using Xunit;
 
 namespace TimeGuard.UITests;
 
-public class TrayStatusTests
+public class TrayStatusTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private sealed class StatusFixture : SeededAppFixture
     {
@@ -42,15 +42,25 @@ public class TrayStatusTests
     {
         using var fx = new StatusFixture();
         Signal(fx.Runtime.StatusEventName);
-        var panel = fx.App.WaitForWindow(fx.Automation, "ScreenTime");
-        Assert.Contains(panel.FindAllDescendants(), e => e.Name == "Owned helper");
+        Window? panel = null;
+        var ready = SpinWait.SpinUntil(() =>
+        {
+            if (fx.App.HasExited) return false;
+            panel = fx.App.GetAllTopLevelWindows(fx.Automation).SingleOrDefault(w => w.Title == "ScreenTime");
+            var content = panel?.FindAllDescendants() ?? [];
+            return content.Any(e => e.Name == "Owned helper") && content.Any(e => e.Name == "Example available");
+        }, TimeSpan.FromSeconds(5));
+        output.WriteLine($"Content ready={ready}; exited={fx.App.HasExited}; fixture windows=" +
+            string.Join(" | ", fx.App.GetAllTopLevelWindows(fx.Automation).Select(w => w.Title)));
+        Assert.True(ready, "Exact fixture popup must render both configured rows without being reopened.");
+        Assert.Contains(panel!.FindAllDescendants(), e => e.Name == "Owned helper");
         Assert.Contains(panel.FindAllDescendants(), e => e.Name == "Example available");
         Assert.DoesNotContain(fx.App.GetAllTopLevelWindows(fx.Automation), w => w.Title == "Protected Access");
-        Signal(fx.Runtime.StatusEventName); Thread.Sleep(300);
-        Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title == "ScreenTime"));
         AssertFullyOnscreen(panel);
-        panel.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "phase6-status.png"));
-        panel.Close();
+        panel.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "beta2-status.png"));
+        Signal(fx.Runtime.StatusEventName); Thread.Sleep(300);
+        Assert.Empty(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title == "ScreenTime"));
+
         var helper = fx.LaunchHelper(headless: true);
         using var process = Process.GetProcessById(helper.Id);
         Assert.True(process.WaitForExit(8000));
@@ -59,19 +69,18 @@ public class TrayStatusTests
     }
 
     [Fact]
-    public void ManyApps_ScrollAndExpandedDetailsSurviveRefresh_AndGrowthStaysOnscreen()
+    public void ManyApps_DirectDetailsAndScrollSurviveRefresh_AndStayOnscreen()
     {
         using var fx = new ManyAppFixture();
         Signal(fx.Runtime.StatusEventName);
         var panel = fx.App.WaitForWindow(fx.Automation, "ScreenTime");
-        var expander = panel.FindAllDescendants().First(e => e.Name == "Details" && e.Patterns.ExpandCollapse.IsSupported);
-        expander.Patterns.ExpandCollapse.Pattern.Expand();
+        Assert.DoesNotContain(panel.FindAllDescendants(), e => e.Name == "Details");
         var scroll = panel.FindFirstDescendant(cf => cf.ByAutomationId("AppListScroll")).Patterns.Scroll.Pattern;
         Assert.True(scroll.VerticallyScrollable.Value);
         scroll.SetScrollPercent(-1, 70);
         var position = scroll.VerticalScrollPercent.Value;
         Thread.Sleep(2200);
-        Assert.Equal(ExpandCollapseState.Expanded, expander.Patterns.ExpandCollapse.Pattern.ExpandCollapseState.Value);
+
         Assert.InRange(scroll.VerticalScrollPercent.Value, position - 1, position + 1);
         AssertFullyOnscreen(panel);
         panel.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "phase6-many-apps.png"));
@@ -123,7 +132,7 @@ public class TrayStatusTests
         Assert.Equal(NotificationPreferences.Minimal, store.Load());
     }
 
-    private static void AssertFullyOnscreen(Window panel)
+    internal static void AssertFullyOnscreen(Window panel)
     {
         var hwnd = panel.Properties.NativeWindowHandle.Value;
         Assert.True(SpinWait.SpinUntil(() =>

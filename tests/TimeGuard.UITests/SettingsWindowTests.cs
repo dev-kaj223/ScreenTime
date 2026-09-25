@@ -5,15 +5,15 @@ using Xunit;
 namespace TimeGuard.UITests;
 
 /// <summary>
-/// Tests the SettingsWindow (rules management, daily cap, save/cancel).
+/// Tests the SettingsWindow (rules management, retained legacy values, save/cancel).
 /// Uses <see cref="SeededAppFixture"/> so the app starts with a known password
 /// and the first-run window is skipped.
 /// </summary>
-public class SettingsWindowTests : IClassFixture<SeededAppFixture>
+public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : IDisposable
 {
-    private readonly SeededAppFixture _fx;
+    private readonly SeededAppFixture _fx = new();
 
-    public SettingsWindowTests(SeededAppFixture fx) => _fx = fx;
+    public void Dispose() => _fx.Dispose();
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
@@ -28,7 +28,16 @@ public class SettingsWindowTests : IClassFixture<SeededAppFixture>
         _fx.RequestSettings();
 
         // Wait for PasswordPromptWindow
-        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
+        FlaUI.Core.AutomationElements.Window prompt;
+        try { prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access"); }
+        catch
+        {
+            output.WriteLine($"Fixture exited={_fx.App.HasExited}; windows=" + string.Join(" | ",
+                _fx.App.GetAllTopLevelWindows(_fx.Automation).Select(w => $"{w.Title} enabled={w.IsEnabled}")));
+            foreach (var log in Directory.EnumerateFiles(_fx.Runtime.Paths.Root, "*.log", SearchOption.AllDirectories))
+                output.WriteLine(File.ReadAllText(log));
+            throw;
+        }
 
         var passwordBoxes = prompt.FindAllDescendants(cf =>
             cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit));
@@ -92,7 +101,48 @@ public class SettingsWindowTests : IClassFixture<SeededAppFixture>
         var dashboard = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
         Assert.Contains("Dashboard", dashboard.Title);
 
+        Assert.True(dashboard.IsEnabled);
+        Assert.DoesNotContain(_fx.App.GetAllTopLevelWindows(_fx.Automation), w => w.Title == "ScreenTime Settings");
         dashboard.Close();
-        settings.Close();
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void Settings_DashboardActivatesExistingSingleton_AfterModalCloses(bool tray)
+    {
+        for (var iteration = 0; iteration < 3; iteration++)
+        {
+        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
+        var existing = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
+        var hwnd = existing.Properties.NativeWindowHandle.Value;
+        var settings = OpenSettingsWindow();
+        if (tray) { using var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName); signal.Set(); }
+        else settings.FindButton("📊 Dashboard").Invoke();
+        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
+        Assert.True(SpinWait.SpinUntil(() => dashboard.IsEnabled, TimeSpan.FromSeconds(3)));
+        Assert.Equal(hwnd, dashboard.Properties.NativeWindowHandle.Value);
+        Assert.Single(_fx.App.GetAllTopLevelWindows(_fx.Automation).Where(w => w.Title.Contains("Usage Dashboard")));
+        dashboard.Close();
+        Assert.False(_fx.App.HasExited);
+        // The same process must accept a fresh protected command after modal navigation.
+        _fx.OpenDatabase().SetSetting("OverallDailyLimitMinutes", "123");
+        var reopened = OpenSettingsWindow();
+        reopened.Close();
+        }
+    }
+
+    [Fact]
+    public void DeferredCapAndBreakControlsAbsent_SavePreservesStoredLegacyCap()
+    {
+        _fx.OpenDatabase().SetSetting("OverallDailyLimitMinutes", "123");
+        var settings = OpenSettingsWindow();
+        Assert.Null(settings.FindTextContaining("Daily Cap"));
+        Assert.Null(settings.FindTextContaining("Break every"));
+        Assert.Null(settings.FindTextContaining("Break dur."));
+        Assert.Null(settings.FindTextContaining("[test]"));
+        Assert.NotNull(settings.FindTextContaining("No recent applications"));
+        settings.FindButton("Save").Invoke();
+        Assert.Equal("123", _fx.OpenDatabase().GetSetting("OverallDailyLimitMinutes"));
     }
 }

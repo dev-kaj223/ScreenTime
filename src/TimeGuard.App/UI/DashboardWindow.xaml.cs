@@ -5,26 +5,54 @@ using OxyPlot.Series;
 using System.Linq;
 using System.Windows;
 using TimeGuard.Services;
+using TimeGuard.Models;
+using TimeGuard.ViewModels;
+using System.Windows.Threading;
 
 namespace TimeGuard.UI;
 
 public partial class DashboardWindow : Window
 {
     private readonly DatabaseService _db;
+    private readonly Func<StatusSnapshot?> _read;
+    private readonly StatusViewModel _status = new();
+    private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
+    private DateTimeOffset _lastHistoryRefresh;
+    private HashSet<string> _configured = [];
     private IReadOnlyList<(DateOnly Date, string ProcessName, double UsageMins, bool IsPassive)> _chartData = [];
 
     private record DrillRow(string ProcessName, string WindowTitle, string Start, string End, string Duration);
 
-    public DashboardWindow(DatabaseService db)
+    public DashboardWindow(DatabaseService db, Func<StatusSnapshot?>? read = null)
     {
         InitializeComponent();
         _db = db;
+        _read = read ?? (() => null);
+        DataContext = _status;
+        _status.Refresh(_read(), DateTimeOffset.UtcNow);
         BuildChart();
+        _timer.Tick += OnRefresh;
+        _timer.Start();
+        Closed += (_, _) => { _timer.Stop(); _timer.Tick -= OnRefresh; };
+    }
+
+    private void OnRefresh(object? sender, EventArgs e)
+    {
+        var now = DateTimeOffset.UtcNow;
+        _status.Refresh(_read(), now);
+        if (now - _lastHistoryRefresh >= TimeSpan.FromSeconds(30)) BuildChart();
     }
 
     private void BuildChart()
     {
-        _chartData = _db.LoadChartData(7);
+        _lastHistoryRefresh = DateTimeOffset.UtcNow;
+        _configured = _db.GetRules().Where(r => r.Enabled).Select(r => ProcessInstance.NormalizeKey(r.ProcessName)).ToHashSet();
+        _chartData = _db.LoadChartData(7).Where(r => _configured.Contains(ProcessInstance.NormalizeKey(r.ProcessName)) &&
+            r.Date <= DateOnly.FromDateTime(DateTime.Today)).ToArray();
+        EmptyHistory.Visibility = _chartData.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+        BarChart.Visibility = _chartData.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        DrilldownHeader.Visibility = _chartData.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        DrilldownGrid.Visibility = _chartData.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
 
         var model = new PlotModel
         {
@@ -41,7 +69,7 @@ public partial class DashboardWindow : Window
         });
 
         // Y axis — dates as categories (BarSeries in OxyPlot 2.x requires CategoryAxis on Left)
-        var dates = _chartData.Select(r => r.Date).Distinct().OrderBy(d => d).ToList();
+        var dates = Enumerable.Range(0, 7).Select(i => DateOnly.FromDateTime(DateTime.Today).AddDays(i - 6)).ToList();
         var yAxis = new CategoryAxis
         {
             Position           = AxisPosition.Left,
@@ -71,24 +99,22 @@ public partial class DashboardWindow : Window
         var apps = _chartData.Select(r => r.ProcessName).Distinct().OrderBy(x => x).ToList();
         var palette = new[]
         {
-            OxyColor.FromRgb(224, 90,  43),
+            OxyColor.FromRgb(159, 200, 244),
             OxyColor.FromRgb(86,  156, 214),
             OxyColor.FromRgb(78,  201, 176),
             OxyColor.FromRgb(220, 220, 100),
             OxyColor.FromRgb(180, 100, 220)
         };
-        var passiveColor = OxyColor.FromRgb(130, 130, 160);
 
         int ruledIdx = 0;
         for (int i = 0; i < apps.Count; i++)
         {
             var app       = apps[i];
-            var isPassive = _chartData.Any(r => r.ProcessName == app && r.IsPassive);
-            var color     = isPassive ? passiveColor : palette[ruledIdx++ % palette.Length];
+            var color     = palette[ruledIdx++ % palette.Length];
 
             var series = new BarSeries
             {
-                Title           = isPassive ? $"{app} (untracked)" : app,
+                Title           = app,
                 FillColor       = color,
                 StrokeThickness = 0
             };
@@ -120,10 +146,12 @@ public partial class DashboardWindow : Window
 
     private void LoadDrilldown(DateOnly date)
     {
-        DrilldownHeader.Text = $"📅 {date:dddd, MMMM d, yyyy}";
+        DrilldownHeader.Text = $"{date:dddd, MMMM d, yyyy}";
         var sessions = _db.LoadSessionsForDay(date);
         DrilldownGrid.ItemsSource = sessions
-            .Select(s => new DrillRow(s.ProcessName, s.WindowTitle, s.StartDisplay, s.EndDisplay, s.DurationDisplay))
+            .Where(s => _configured.Contains(ProcessInstance.NormalizeKey(s.ProcessName)) && s.IsPassive == 0)
+            .Select(s => new DrillRow(s.ProcessName, s.WindowTitle, SessionTime(s.StartTime), SessionTime(s.EndTime), s.DurationDisplay))
             .ToList();
     }
+    private static string SessionTime(string value) => DateTimeOffset.TryParse(value, out var instant) ? DisplayTime.Clock(instant) : "Unknown";
 }

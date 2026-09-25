@@ -3,29 +3,48 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:oxy="http://oxyplot.org/wpf"
         Title="ScreenTime — Usage Dashboard"
-        Width="820" Height="560"
+        Width="820" Height="800"
         MinWidth="600" MinHeight="420"
         Icon="{DynamicResource ScreenTimeBrandImage}"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource DarkBrush}">
-    <Grid Margin="20">
-        <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="200"/>
-        </Grid.RowDefinitions>
-
-        <!-- Header -->
-        <TextBlock Grid.Row="0" Text="📊 Usage Dashboard"
-                   Foreground="{StaticResource TextBrush}"
-                   FontSize="18" FontWeight="Bold" Margin="0,0,0,16"/>
-
-        <!-- 7-day bar chart -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="24">
+        <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
+            <Image Source="{DynamicResource ScreenTimeBrandImage}" Width="30" Height="30"/>
+            <TextBlock Text="ScreenTime / Today" Foreground="{StaticResource TextBrush}" FontSize="24" FontWeight="SemiBold" Margin="10,0,0,0"/>
+        </StackPanel>
+        <TextBlock Text="{Binding Summary}" Foreground="{StaticResource SubtextBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
+        <ScrollViewer MaxHeight="245" VerticalScrollBarVisibility="Auto" Margin="0,0,0,20">
+            <ItemsControl x:Name="TodayApps" ItemsSource="{Binding Apps}">
+                <ItemsControl.ItemTemplate><DataTemplate>
+                    <Border Background="#252831" BorderBrush="#414650" BorderThickness="1" Padding="14" Margin="0,0,0,8" CornerRadius="6">
+                        <Grid><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="*"/></Grid.ColumnDefinitions>
+                            <StackPanel Margin="0,0,12,0">
+                                <TextBlock Text="{Binding DisplayName}" Foreground="#F0F0F0" FontSize="18" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding State}" Foreground="{Binding Accent}" FontWeight="SemiBold" Margin="0,5,0,0"/>
+                                <TextBlock Text="{Binding Usage}" Foreground="#D7DEE9" Margin="0,6,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                            <StackPanel Grid.Column="1">
+                                <TextBlock Text="{Binding Primary}" Foreground="#F0F0F0" FontSize="18" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Secondary}" Foreground="#D7DEE9" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                                <TextBlock Text="{Binding Upcoming}" Foreground="#BAC1CD" Margin="0,4,0,0" TextWrapping="Wrap"/>
+                            </StackPanel>
+                        </Grid>
+                    </Border>
+                </DataTemplate></ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </ScrollViewer>
+        <TextBlock Text="Last 7 Days" Foreground="{StaticResource TextBrush}" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,10"/>        <!-- 7-day bar chart -->
         <Border Grid.Row="1"
                 Background="{StaticResource SurfaceBrush}"
                 CornerRadius="8" Padding="8" Margin="0,0,0,16">
-            <oxy:PlotView x:Name="BarChart" Background="Transparent"/>
+                        <Grid MinHeight="160">
+                <oxy:PlotView x:Name="BarChart" Background="Transparent" Height="230"/>
+                <StackPanel x:Name="EmptyHistory" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
+                    <TextBlock Text="No usage recorded yet." Foreground="{StaticResource TextBrush}" FontSize="18" TextAlignment="Center"/>
+                    <TextBlock Text="ScreenTime will show your last seven days here as usage accumulates." Foreground="{StaticResource SubtextBrush}" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                </StackPanel>
+            </Grid>
         </Border>
 
         <!-- Day drilldown header -->
@@ -35,7 +54,7 @@
                    FontSize="12" Margin="0,0,0,8"/>
 
         <!-- Drilldown table -->
-        <DataGrid Grid.Row="3" x:Name="DrilldownGrid"
+        <DataGrid Grid.Row="3" x:Name="DrilldownGrid" Height="130"
                   AutoGenerateColumns="False"
                   Background="{StaticResource DarkBrush}"
                   Foreground="{StaticResource TextBrush}"
@@ -46,10 +65,10 @@
             <DataGrid.Columns>
                 <DataGridTextColumn Header="App"          Binding="{Binding ProcessName}"  Width="110"/>
                 <DataGridTextColumn Header="Window Title" Binding="{Binding WindowTitle}"  Width="*"/>
-                <DataGridTextColumn Header="Start"        Binding="{Binding Start}"        Width="60"/>
-                <DataGridTextColumn Header="End"          Binding="{Binding End}"          Width="60"/>
+                <DataGridTextColumn Header="Start"        Binding="{Binding Start}"        Width="90"/>
+                <DataGridTextColumn Header="End"          Binding="{Binding End}"          Width="90"/>
                 <DataGridTextColumn Header="Duration"     Binding="{Binding Duration}"     Width="80"/>
             </DataGrid.Columns>
         </DataGrid>
-    </Grid>
+    </StackPanel></ScrollViewer>
 </Window>

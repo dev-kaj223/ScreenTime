@@ -1,60 +1,59 @@
+using System.Diagnostics;
+using TimeGuard.Models;
 using TimeGuard.UITests.Helpers;
 using Xunit;
 
 namespace TimeGuard.UITests;
 
-/// <summary>
-/// Tests the Dashboard window (7-day bar chart + drilldown table).
-/// Uses <see cref="SeededAppFixture"/> to skip first-run, then opens Settings
-/// and clicks the Dashboard button.
-/// </summary>
-public class DashboardWindowTests : IClassFixture<SeededAppFixture>
+public class DashboardWindowTests
 {
-    private readonly SeededAppFixture _fx;
-
-    public DashboardWindowTests(SeededAppFixture fx) => _fx = fx;
-
-    private FlaUI.Core.AutomationElements.Window OpenDashboard()
+    private sealed class PopulatedFixture : SeededAppFixture
     {
-        // Open settings the same way SettingsWindowTests does
-        _fx.RequestSettings();
-
-        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
-        var boxes = prompt.FindAllDescendants(cf => cf.ByFrameworkId("WPF")
-            .And(cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit)));
-        if (boxes.Length > 0)
+        protected override void SeedDatabase()
         {
-            boxes[0].Focus();
-            FlaUI.Core.Input.Keyboard.Type(AppFixture.TestPassword);
+            base.SeedDatabase();
+            var db = OpenDatabase();
+            db.SaveRule(new() { ProcessName = "screentime.testprocess", DisplayName = "Dashboard helper", DailyLimitMinutes = 1 });
+            db.UpsertUsageEntry(DateOnly.FromDateTime(DateTime.Today), new() { ProcessName = "screentime.testprocess", QuotaSeconds = 60, ObservedSeconds = 60 });
+            db.UpsertUsageEntry(DateOnly.FromDateTime(DateTime.Today).AddDays(-2), new() { ProcessName = "screentime.testprocess", QuotaSeconds = 30, ObservedSeconds = 30 });
+            db.UpsertUsageEntry(DateOnly.FromDateTime(DateTime.Today), new() { ProcessName = "unrelated-legacy", QuotaSeconds = 600, ObservedSeconds = 600 });
         }
-        prompt.FindButton("Unlock").Click();
+    }
+    private static void Open(AppFixture fx) { using var signal = EventWaitHandle.OpenExisting(fx.Runtime.DashboardEventName); signal.Set(); }
 
-        var settings = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
-        settings.FindButton("📊 Dashboard").Click();
-
-        return _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
+    [Fact]
+    public void Dashboard_PasswordFree_Singleton_EmptyState_CloseDoesNotExit()
+    {
+        using var fx = new SeededAppFixture();
+        Open(fx);
+        var dashboard = fx.App.WaitForWindow(fx.Automation, "Usage Dashboard");
+        Assert.NotNull(dashboard.FindTextContaining("No usage recorded yet."));
+        Assert.NotNull(dashboard.FindTextContaining("Last 7 Days"));
+        Assert.DoesNotContain(fx.App.GetAllTopLevelWindows(fx.Automation), w => w.Title == "Protected Access");
+        var handle = dashboard.Properties.NativeWindowHandle.Value;
+        Open(fx); Thread.Sleep(300);
+        Assert.Equal(handle, Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title.Contains("Usage Dashboard"))).Properties.NativeWindowHandle.Value);
+        dashboard.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "beta2-dashboard-empty.png"));
+        dashboard.Close(); Assert.False(fx.App.HasExited);
+        Open(fx); fx.App.WaitForWindow(fx.Automation, "Usage Dashboard").Close();
     }
 
     [Fact]
-    public void Dashboard_HasCorrectTitle()
+    public void Dashboard_PopulatedTodayAndHistory_CloseLeavesExactEnforcementRunning()
     {
-        var dashboard = OpenDashboard();
-        Assert.Contains("Dashboard", dashboard.Title);
+        using var fx = new PopulatedFixture();
+        Open(fx);
+        var dashboard = fx.App.WaitForWindow(fx.Automation, "Usage Dashboard");
+        Assert.NotNull(dashboard.FindTextContaining("Dashboard helper"));
+        Assert.NotNull(dashboard.FindTextContaining("DAILY LIMIT REACHED"));
+        Assert.NotNull(dashboard.FindTextContaining("1 min used / 1 min"));
+        Assert.Null(dashboard.FindTextContaining("No usage recorded yet."));
+        Assert.Null(dashboard.FindTextContaining("unrelated-legacy"));
+        Assert.NotNull(dashboard.FindTextContaining("Click a bar"));
+        dashboard.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "beta2-dashboard-populated.png"));
         dashboard.Close();
-        _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings").Close();
-    }
-
-    [Fact]
-    public void Dashboard_DrilldownHeaderIsPresent()
-    {
-        var dashboard = OpenDashboard();
-
-        // The drilldown header TextBlock is always present (default text or a date after click)
-        var header = dashboard.FindAllDescendants()
-            .FirstOrDefault(e => e.Name?.Contains("Click a bar") == true
-                              || e.Name?.Contains("breakdown") == true);
-        Assert.NotNull(header);
-        dashboard.Close();
-        _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings").Close();
+        var helper = fx.LaunchHelper(headless: true);
+        using var process = Process.GetProcessById(helper.Id);
+        Assert.True(process.WaitForExit(8000)); Assert.False(fx.App.HasExited);
     }
 }

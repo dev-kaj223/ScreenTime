@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using FlaUI.Core.AutomationElements;
 using FlaUI.Core.Definitions;
 using FlaUI.Core.Input;
 using TimeGuard.Models;
@@ -68,6 +69,33 @@ public class ReleaseSmokeTests(ITestOutputHelper output)
         }, TimeSpan.FromSeconds(5)));
         Assert.False(fixture.OpenDatabase().LoadConfig().IsFirstRun);
         BrandingTests.CaptureShellIcon(fixture, taskbar: false, prefix: "phase9");
+        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime Settings");
+        Assert.DoesNotContain(fixture.App.GetAllTopLevelWindows(fixture.Automation), w => w.Title == "Protected Access");
+        settings.FindButton("➕ Add Rule").Invoke();
+        var editor = fixture.App.WaitForWindow(fixture.Automation, "Edit App Rule");
+        editor.FindTextBox("DisplayNameBox").AsTextBox().Text = "Package UX fixture";
+        editor.FindTextBox("ProcessNameBox").AsTextBox().Text = "package-ux-fixture";
+        editor.FindTextBox("MondayHoursBox").AsTextBox().Text = "1";
+        editor.FindTextBox("MondayMinutesBox").AsTextBox().Text = "30";
+        editor.FindButton("AddPeriodButton").Invoke(); // Monday 9:00 AM–5:00 PM defaults.
+        editor.FindButton("Save").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => fixture.OpenDatabase().GetRules().Count == 1, TimeSpan.FromSeconds(3)));
+        var rule = Assert.Single(fixture.OpenDatabase().GetRules());
+        Assert.Equal(90, rule.GetScheduleForDay(DayOfWeek.Monday).DailyLimitMinutes);
+        var period = Assert.Single(rule.BlockedPeriods);
+        Assert.Equal(540, period.StartMinute); Assert.Equal(1020, period.EndMinute);
+        settings.FindButton("Save").Invoke();
+        Signal(fixture.Runtime.DashboardEventName);
+        var dashboard = fixture.App.WaitForWindow(fixture.Automation, "Usage Dashboard");
+        var dashboardHandle = dashboard.Properties.NativeWindowHandle.Value;
+        Signal(fixture.Runtime.DashboardEventName); Thread.Sleep(200);
+        Assert.Equal(dashboardHandle, Assert.Single(fixture.App.GetAllTopLevelWindows(fixture.Automation).Where(w => w.Title.Contains("Usage Dashboard"))).Properties.NativeWindowHandle.Value);
+        Signal(fixture.Runtime.StatusEventName);
+        FlaUI.Core.AutomationElements.Window? popup = null;
+        Assert.True(SpinWait.SpinUntil(() => (popup = fixture.App.GetAllTopLevelWindows(fixture.Automation).SingleOrDefault(w => w.Title == "ScreenTime")) is not null, TimeSpan.FromSeconds(3)));
+        popup!.FindButton("Dashboard").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => !fixture.App.GetAllTopLevelWindows(fixture.Automation).Any(w => w.Title == "ScreenTime"), TimeSpan.FromSeconds(3)));
+        dashboard.Close(); Assert.False(fixture.App.HasExited);
         fixture.StopApplication();
     }
     [ReleaseFact]

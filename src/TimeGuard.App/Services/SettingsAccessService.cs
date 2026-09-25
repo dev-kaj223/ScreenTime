@@ -4,9 +4,18 @@ namespace TimeGuard.Services;
 
 /// <summary>One command boundary for both Settings and Exit. Each invocation authenticates anew.</summary>
 internal sealed class SettingsAccessService(Func<(string Hash, string Salt)> credentials,
-    Func<string?> prompt, Action settings, Func<Task> exit, Func<bool> stopping)
+    Func<string?> prompt, Action settings, Func<Task> exit, Func<bool> stopping, bool initialConfigurationAuthorized = false)
 {
     private bool _busy;
+    private bool _initialConfigurationAuthorized = initialConfigurationAuthorized;
+    internal void OpenInitialConfiguration()
+    {
+        if (!_initialConfigurationAuthorized || _busy || stopping()) return;
+        _initialConfigurationAuthorized = false;
+        _busy = true;
+        try { settings(); }
+        finally { _busy = false; }
+    }
     public void OpenSettings() => ExecuteSettings();
     private void ExecuteSettings()
     {
