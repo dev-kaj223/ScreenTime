@@ -8,6 +8,29 @@ namespace TimeGuard.Tests;
 
 public class NotificationTests
 {
+    [Fact]
+    public async Task OutboxStop_DiscardsReadyAndInFlightNotice_AfterJoiningReceiptWriter()
+    {
+        using var p = new TempProfile(); var db = new DatabaseService(p.Runtime.Paths);
+        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        var store = new ReceiptStore(db, _ => { entered.Set(); release.Wait(TimeSpan.FromSeconds(10)); return true; });
+        var outbox = new NotificationOutbox(store, _ => true, null);
+        var now = DateTimeOffset.UtcNow;
+        outbox.Queue(new("ready", "first", "First", NotificationKind.Blocked, now, now.AddMinutes(1), TimeSpan.Zero));
+        await outbox.Completion;
+        outbox.Queue(new("in-flight", "second", "Second", NotificationKind.QuotaTenMinutes, now, now.AddMinutes(1), TimeSpan.FromMinutes(10)));
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+        try
+        {
+            var stopping = outbox.StopAsync(); Assert.False(stopping.IsCompleted);
+            Assert.False(outbox.TryRead(out _)); release.Set();
+            await stopping.WaitAsync(TimeSpan.FromSeconds(5));
+            outbox.Queue(new("late", "third", "Third", NotificationKind.Blocked, now, now.AddMinutes(1), TimeSpan.Zero));
+            Assert.False(outbox.TryRead(out _));
+        }
+        finally { release.Set(); await outbox.StopAsync(); }
+    }
+
     private static readonly ProcessInstance Helper = new("helper", 10, 123, 1);
     private static readonly DateOnly Day = new(2026, 9, 23);
     private static AppConfig Config() => new() { Rules = [new() { ProcessName = "helper", DisplayName = "Helper", DailyLimitMinutes = 11 }] };

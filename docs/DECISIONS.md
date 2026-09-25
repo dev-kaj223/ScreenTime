@@ -10,6 +10,8 @@ Use the current approved requirements and this ledger for product intent, the ar
 
 ## Accepted product choices
 
+Current integration also includes Phase 6 at `899ed1344137472bed5dcf1e5e871504b2e719b0` (PR #2). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/2#pullrequestreview-5313944356) cleared `4951d1a` with 204 Core/58 UI tests, CI/preservation success and no remaining manual gate. Earlier reports keep their writing-time evidence and limitations.
+
 | ID | Decision and rationale | Source |
 |---|---|---|
 | D01 | Evolve the lightweight Windows .NET/WPF app with Core policy/enforcement and SQLite storage. Keep `TimeGuard.*` internal names; avoid a rewrite or privileged service. | [Architecture: MVP and sections 3–5](SCREEN_TIME_ARCHITECTURE_PLAN.md), [Phase 2](PHASE2_IMPLEMENTATION.md) |

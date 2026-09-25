@@ -31,8 +31,7 @@ public partial class FirstRunWindow : Window
         }
 
         var (hash, salt) = PasswordHelper.Hash(PasswordBox.Password);
-        _db.SetSetting("PasswordHash", hash);
-        _db.SetSetting("PasswordSalt", salt);
+        _db.SavePassword(hash, salt);
 
         DialogResult = true;
         Close();

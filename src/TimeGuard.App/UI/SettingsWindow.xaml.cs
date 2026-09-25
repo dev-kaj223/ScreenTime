@@ -141,11 +141,17 @@ public partial class SettingsWindow : Window
 
     private void OnPickProcess(object sender, RoutedEventArgs e)
     {
-        var running = Process.GetProcesses()
-            .Select(p => p.ProcessName.ToLowerInvariant())
-            .Distinct()
-            .OrderBy(x => x)
-            .ToList();
+        var names = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var process in Process.GetProcesses())
+        {
+            using (process)
+            {
+                try { names.Add(process.ProcessName.ToLowerInvariant()); }
+                catch (InvalidOperationException) { } // Exited while the picker was opening.
+                catch (System.ComponentModel.Win32Exception) { } // Not readable by this user.
+            }
+        }
+        var running = names.OrderBy(name => name).ToList();
 
         var picker = new ProcessPickerWindow(running);
         if (picker.ShowDialog() == true && picker.SelectedProcess is not null)
@@ -226,8 +232,7 @@ public partial class SettingsWindow : Window
         }
 
         var (hash, salt) = PasswordHelper.Hash(NewPasswordBox.Password);
-        _db.SetSetting("PasswordHash", hash);
-        _db.SetSetting("PasswordSalt", salt);
+        _db.SavePassword(hash, salt);
 
         NewPasswordBox.Clear();
         ConfirmPasswordBox.Clear();

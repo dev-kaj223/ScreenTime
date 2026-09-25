@@ -76,7 +76,7 @@ public partial class App : WpfApplication
                 () => _monitor.TryReadNotification(out var request) ? request : null,
                 _monitor.IsNotificationCurrent, _logger,
                 e.Args.Contains("--notice-diagnostics") ? WriteNoticeDiagnostic : null, () => _notificationPreferences);
-            _access = new SettingsAccessService(() => (_db.GetSetting("PasswordHash") ?? "", _db.GetSetting("PasswordSalt") ?? ""),
+            _access = new SettingsAccessService(_db.LoadPassword,
                 () => { var prompt = new UI.PasswordPromptWindow(_db); return prompt.ShowDialog() == true ? prompt.Password : null; },
                 OpenAuthorizedSettings, () => StopAndShutdownAsync(0), () => _stopping);
             _tray = new TrayIconService(() => _monitor.Status, OpenSettings, () => _access.ExitAsync());

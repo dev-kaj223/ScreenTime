@@ -17,6 +17,8 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
     [DllImport("user32.dll")] private static extern bool IsIconic(IntPtr hwnd);
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(System.Drawing.Point point);
 
     [Fact]
     public void PassiveNotices_PreserveForegroundAndKeyboard_PassMouseThrough_AutoDismiss_AllKinds()
@@ -26,12 +28,37 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
         using var helperApp = FlaUI.Core.Application.Attach(helper.Id);
         var window = helperApp.GetMainWindow(fx.Automation, TimeSpan.FromSeconds(5));
         Assert.NotNull(window);
+        // Establish the owned helper as the foreground target before measuring notices.
+        // UIA Focus alone need not activate a newly launched cross-process window.
+        window.SetForeground();
         window.Focus();
         var helperHwnd = window.Properties.NativeWindowHandle.Value;
+        var inputPath = Path.Combine(fx.Runtime.Paths.Root, "helper-input.txt");
+        if (GetForegroundWindow() != helperHwnd)
+        {
+            // Windows may deny programmatic activation without recent input. Raise only our
+            // owned normal window (never topmost), verify the hit target, then activate by click.
+            Assert.True(SetWindowPos(helperHwnd, IntPtr.Zero, 0, 0, 0, 0, 0x13)); // NOACTIVATE|NOMOVE|NOSIZE
+            var area = window.BoundingRectangle;
+            var target = new System.Drawing.Point((int)(area.Left + area.Width / 2), (int)(area.Top + area.Height / 2));
+            var hit = WindowFromPoint(target);
+            var foreground = GetForegroundWindow();
+            GetWindowThreadProcessId(hit, out var hitPid);
+            GetWindowThreadProcessId(foreground, out var foregroundPid);
+            string hitName;
+            try { using var process = Process.GetProcessById((int)hitPid); hitName = process.ProcessName; }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+            { hitName = "unavailable"; }
+            output.WriteLine($"Setup helper={helperHwnd}/pid={helper.Id}; hit={hit}/pid={hitPid}/{hitName}; foreground={foreground}/pid={foregroundPid}; point={target}; bounds={area}");
+            Assert.Equal(helperHwnd, hit); // Never click an unrelated window.
+            var beforeSetup = ReadCounts(inputPath);
+            Mouse.Click(target);
+            Assert.True(SpinWait.SpinUntil(() => ReadCounts(inputPath).Clicks > Math.Max(0, beforeSetup.Clicks), TimeSpan.FromSeconds(3)),
+                "Owned helper did not receive the setup click.");
+        }
         Assert.True(SpinWait.SpinUntil(() => GetForegroundWindow() == helperHwnd, TimeSpan.FromSeconds(5)),
             "Interactive desktop unavailable: the owned helper cannot become foreground.");
         var path = Path.Combine(fx.Runtime.Paths.Root, "notice-diagnostics.jsonl");
-        var inputPath = Path.Combine(fx.Runtime.Paths.Root, "helper-input.txt");
         using var signal = EventWaitHandle.OpenExisting(fx.Runtime.NoticeEventName);
         var heights = new List<double>();
         var headings = new[] { "TIME REMAINING", "5 MINUTES LEFT", "FINISH YOUR SESSION", "FINAL WARNING", "TIME EXPIRED", "FINAL MINUTE" };

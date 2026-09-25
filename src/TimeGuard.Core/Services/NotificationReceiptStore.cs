@@ -22,6 +22,7 @@ internal sealed class NotificationReceiptStore
             DataSource = _memory ? "ScreenTime-notices-" + Guid.NewGuid().ToString("N")
                 : Path.GetFullPath(source.DataSource) + ".notifications.db",
             Mode = _memory ? SqliteOpenMode.Memory : SqliteOpenMode.ReadWriteCreate,
+            DefaultTimeout = 5,
             Cache = _memory ? SqliteCacheMode.Shared : SqliteCacheMode.Private
         };
         DatabaseMigrator.RejectLegacyPath(destination.DataSource);

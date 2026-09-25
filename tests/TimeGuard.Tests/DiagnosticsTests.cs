@@ -7,6 +7,26 @@ namespace TimeGuard.Tests;
 public class DiagnosticsTests
 {
     [Fact]
+    public void ConcurrentOversizedFailures_RemainParseableAndRetainOnlyOneBoundedBackup()
+    {
+        using var profile = new TempProfile();
+        var logger = new JsonFileLogger(profile.Runtime, maxBytes: 4096);
+        var error = new IOException(new string('x', 100000), new IOException(new string('y', 100000)));
+        Parallel.For(0, 200, _ => logger.Write("Error", "StressFailure", error));
+        var files = Directory.GetFiles(profile.Runtime.Paths.LogsDirectory);
+        Assert.Equal(2, files.Length);
+        foreach (var file in files)
+        {
+            Assert.InRange(new FileInfo(file).Length, 1, 40000); // One bounded record may exceed the rotation threshold.
+            foreach (var line in File.ReadLines(file))
+            {
+                using var record = JsonDocument.Parse(line);
+                Assert.Equal(16384, record.RootElement.GetProperty("exception").GetProperty("message").GetString()!.Length);
+            }
+        }
+    }
+
+    [Fact]
     public void Logger_RecordsStructuredExceptionAndRunContext()
     {
         using var profile = new TempProfile();

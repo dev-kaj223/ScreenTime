@@ -16,6 +16,7 @@ public class DatabaseService : IStateStore
 
     private readonly string _connectionString;
     private readonly NotificationReceiptStore _notificationReceipts;
+    internal Action<SqliteConnection>? ConfigureConnectionForTesting { get; set; }
 
     public DatabaseService(string? connectionString = null)
     {
@@ -24,6 +25,8 @@ public class DatabaseService : IStateStore
             : new SqliteConnectionStringBuilder(connectionString);
         DatabaseMigrator.RejectLegacyPath(builder.DataSource);
         builder.ForeignKeys = true;
+        // Bound busy retries; a persistent failure still reaches monitor supervision.
+        builder.DefaultTimeout = 5;
         // Explicit connections have no dependency on a default profile directory.
         if (!string.IsNullOrEmpty(builder.DataSource) && builder.DataSource != ":memory:" &&
             builder.Mode != SqliteOpenMode.Memory)
@@ -44,9 +47,14 @@ public class DatabaseService : IStateStore
     private SqliteConnection Open()
     {
         var conn = new SqliteConnection(_connectionString);
-        conn.Open();
-        conn.Execute("PRAGMA synchronous=FULL");
-        return conn;
+        try
+        {
+            conn.Open();
+            conn.Execute("PRAGMA synchronous=FULL");
+            ConfigureConnectionForTesting?.Invoke(conn);
+            return conn;
+        }
+        catch { conn.Dispose(); throw; }
     }
 
     // ── Settings ──────────────────────────────────────────────────────────────
@@ -70,23 +78,47 @@ public class DatabaseService : IStateStore
     // Convenience wrappers for the AppConfig fields stored in Settings
     public AppConfig LoadConfig()
     {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction(deferred: true);
+        var settings = conn.Query<(string Key, string Value)>("SELECT Key,Value FROM Settings", transaction: tx)
+            .ToDictionary(row => row.Key, row => row.Value);
         return new AppConfig
         {
-            PasswordHash             = GetSetting("PasswordHash") ?? string.Empty,
-            PasswordSalt             = GetSetting("PasswordSalt") ?? string.Empty,
-            SettingsHotkey           = GetSetting("SettingsHotkey") ?? "Ctrl+Alt+Shift+G",
-            OverallDailyLimitMinutes = int.TryParse(GetSetting("OverallDailyLimitMinutes"), out var cap) ? cap : 0,
-            Rules                    = GetRules()
+            PasswordHash             = settings.GetValueOrDefault("PasswordHash", string.Empty),
+            PasswordSalt             = settings.GetValueOrDefault("PasswordSalt", string.Empty),
+            SettingsHotkey           = settings.GetValueOrDefault("SettingsHotkey", "Ctrl+Alt+Shift+G"),
+            OverallDailyLimitMinutes = int.TryParse(settings.GetValueOrDefault("OverallDailyLimitMinutes"), out var cap) ? cap : 0,
+            Rules                    = GetRules(conn, tx)
         };
     }
 
+    public (string Hash, string Salt) LoadPassword()
+    {
+        using var conn = Open();
+        var values = conn.Query<(string Key, string Value)>(
+            "SELECT Key,Value FROM Settings WHERE Key IN ('PasswordHash','PasswordSalt')")
+            .ToDictionary(row => row.Key, row => row.Value);
+        return (values.GetValueOrDefault("PasswordHash", ""), values.GetValueOrDefault("PasswordSalt", ""));
+    }
+
+    public void SavePassword(string hash, string salt) => SaveSettings(
+        [("PasswordHash", hash), ("PasswordSalt", salt)]);
+
     public void SaveConfig(AppConfig config)
     {
-        SetSetting("PasswordHash",             config.PasswordHash);
-        SetSetting("PasswordSalt",             config.PasswordSalt);
-        SetSetting("SettingsHotkey",           config.SettingsHotkey);
-        SetSetting("OverallDailyLimitMinutes", config.OverallDailyLimitMinutes.ToString());
+        SaveSettings([("PasswordHash", config.PasswordHash), ("PasswordSalt", config.PasswordSalt),
+            ("SettingsHotkey", config.SettingsHotkey), ("OverallDailyLimitMinutes", config.OverallDailyLimitMinutes.ToString())]);
         // Rules are saved separately via SaveRule / DeleteRule
+    }
+
+    private void SaveSettings(IEnumerable<(string Key, string Value)> settings)
+    {
+        using var conn = Open();
+        using var tx = conn.BeginTransaction();
+        foreach (var (key, value) in settings)
+            conn.Execute("INSERT INTO Settings(Key,Value) VALUES(@key,@value) " +
+                "ON CONFLICT(Key) DO UPDATE SET Value=excluded.Value", new { key, value }, tx);
+        tx.Commit();
     }
 
     // ── App Rules ─────────────────────────────────────────────────────────────
@@ -94,6 +126,12 @@ public class DatabaseService : IStateStore
     public List<AppRule> GetRules()
     {
         using var conn = Open();
+        using var tx = conn.BeginTransaction(deferred: true);
+        return GetRules(conn, tx);
+    }
+
+    private static List<AppRule> GetRules(SqliteConnection conn, SqliteTransaction tx)
+    {
         var rules = conn.Query<AppRule>("""
             SELECT Id, ProcessName, DisplayName,
                    DailyLimitMins  AS DailyLimitMinutes,
@@ -103,7 +141,7 @@ public class DatabaseService : IStateStore
                     BreakDurationMins AS BreakDurationMinutes,
                    Enabled
             FROM AppRules ORDER BY DisplayName
-            """).ToList();
+            """, transaction: tx).ToList();
 
         var scheduleLookup = conn.Query<AppRuleDayScheduleRow>("""
             SELECT RuleId,
@@ -113,7 +151,7 @@ public class DatabaseService : IStateStore
                    WindowEnd      AS AllowedWindowEnd
             FROM AppRuleDaySchedules
             ORDER BY RuleId, DayOfWeek
-            """)
+            """, transaction: tx)
             .GroupBy(row => row.RuleId)
             .ToDictionary(
                 group => group.Key,
@@ -121,7 +159,7 @@ public class DatabaseService : IStateStore
 
         foreach (var rule in rules)
         {
-            rule.BlockedPeriods = conn.Query<BlockedPeriod>("SELECT * FROM BlockedPeriods WHERE RuleId=@Id ORDER BY StartDayOfWeek,StartMinute", new { rule.Id }).ToList();
+            rule.BlockedPeriods = conn.Query<BlockedPeriod>("SELECT * FROM BlockedPeriods WHERE RuleId=@Id ORDER BY StartDayOfWeek,StartMinute", new { rule.Id }, tx).ToList();
             if (scheduleLookup.TryGetValue(rule.Id, out var schedules))
                 rule.SetWeekSchedule(schedules);
             else
@@ -144,10 +182,11 @@ public class DatabaseService : IStateStore
 
         var schedules      = GetSchedulesForPersistence(rule);
         var legacySchedule = GetLegacyScheduleForPersistence(schedules);
+        var persistedId = rule.Id;
 
         if (rule.Id == 0)
         {
-            rule.Id = conn.QuerySingle<int>("""
+            persistedId = conn.QuerySingle<int>("""
                 INSERT INTO AppRules(ProcessName, DisplayName, DailyLimitMins,
                     WindowStart, WindowEnd, BreakEveryMins, BreakDurationMins, Enabled)
                 VALUES(@ProcessName, @DisplayName, @DailyLimitMinutes,
@@ -193,7 +232,7 @@ public class DatabaseService : IStateStore
         }
 
         conn.Execute("DELETE FROM AppRuleDaySchedules WHERE RuleId = @ruleId",
-            new { ruleId = rule.Id }, tx);
+            new { ruleId = persistedId }, tx);
 
         conn.Execute("""
             INSERT INTO AppRuleDaySchedules(RuleId, DayOfWeek, DailyLimitMins, WindowStart, WindowEnd)
@@ -201,7 +240,7 @@ public class DatabaseService : IStateStore
             """,
             schedules.Select(schedule => new
             {
-                RuleId             = rule.Id,
+                RuleId             = persistedId,
                 DayOfWeek          = (int)schedule.DayOfWeek,
                 schedule.DailyLimitMinutes,
                 schedule.AllowedWindowStart,
@@ -209,12 +248,13 @@ public class DatabaseService : IStateStore
             }),
             tx);
 
-        conn.Execute("DELETE FROM BlockedPeriods WHERE RuleId=@Id", new { rule.Id }, tx);
+        conn.Execute("DELETE FROM BlockedPeriods WHERE RuleId=@Id", new { Id = persistedId }, tx);
         conn.Execute("""
             INSERT INTO BlockedPeriods(RuleId,StartDayOfWeek,StartMinute,EndMinute,EndDayOffset,Enabled)
             VALUES(@RuleId,@StartDayOfWeek,@StartMinute,@EndMinute,@EndDayOffset,@Enabled)
-            """, rule.BlockedPeriods.Select(p => p with { RuleId = rule.Id }), tx);
+            """, rule.BlockedPeriods.Select(p => p with { RuleId = persistedId }), tx);
         tx.Commit();
+        rule.Id = persistedId; // Do not publish an identity that a rollback can erase.
     }
 
     public void DeleteRule(int id)
@@ -302,7 +342,8 @@ public class DatabaseService : IStateStore
     public IReadOnlyList<GraceEpisode> LoadGraceEpisodes()
     {
         using var conn = Open();
-        return LoadGraceEpisodes(conn, null);
+        using var tx = conn.BeginTransaction(deferred: true);
+        return LoadGraceEpisodes(conn, tx);
     }
 
     private static IReadOnlyList<GraceEpisode> LoadGraceEpisodes(SqliteConnection conn, SqliteTransaction? tx)

@@ -16,6 +16,19 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
+    private void CloseSettings(Window settings)
+    {
+        // UIA Invoke/Close can return before WPF finishes closing the modal editor.
+        // Do not close its disabled owner or leave shared fixture state for the next test.
+        Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)),
+            "Settings remained disabled after its modal editor closed.");
+        var handle = settings.Properties.NativeWindowHandle.Value;
+        settings.Close();
+        Assert.True(SpinWait.SpinUntil(() => !_fx.App.GetAllTopLevelWindows(_fx.Automation)
+            .Any(window => window.Properties.NativeWindowHandle.Value == handle), TimeSpan.FromSeconds(3)),
+            "Settings did not close before the next test.");
+    }
+
     private FlaUI.Core.AutomationElements.Window OpenSettingsWindow()
     {
         _fx.RequestSettings();
@@ -77,7 +90,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.NotNull(error);
 
         ruleWindow.Close();
-        settings.Close();
+        CloseSettings(settings);
     }
 
     /// <summary>
@@ -102,7 +115,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.NotNull(error);
 
         ruleWindow.Close();
-        settings.Close();
+        CloseSettings(settings);
     }
 
     /// <summary>
@@ -128,7 +141,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.False(windows.Any(w => w.Title?.Contains("Edit App Rule") == true),
             "RuleEditWindow should close when no daily limit is set.");
 
-        settings.Close();
+        CloseSettings(settings);
     }
 
     /// <summary>
@@ -157,7 +170,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.NotNull(error);
 
         ruleWindow.Close();
-        settings.Close();
+        CloseSettings(settings);
     }
 
     /// <summary>
@@ -182,7 +195,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.False(windows.Any(w => w.Title?.Contains("Edit App Rule") == true),
             "RuleEditWindow should close when break duration equals break interval.");
 
-        settings.Close();
+        CloseSettings(settings);
     }
 
     [Fact]
@@ -219,7 +232,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.Equal(720, period.StartMinute);
         Assert.Equal(840, period.EndMinute);
 
-        settings.Close();
+        CloseSettings(settings);
     }
 
     [Fact]
@@ -255,7 +268,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.Equal(2, saved.BlockedPeriods.Count);
         Assert.Contains(saved.BlockedPeriods, p => p.StartDayOfWeek == DayOfWeek.Sunday && p.EndDayOffset == 1 && p.StartMinute == 1320 && p.EndMinute == 480);
         Assert.Contains(saved.BlockedPeriods, p => p.StartDayOfWeek == DayOfWeek.Monday && p.StartMinute == 480 && p.EndMinute == 1020);
-        settings.Close();
+        CloseSettings(settings);
     }
 
     [Theory]
@@ -271,7 +284,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         editor.FindButton("Add period").Invoke();
         Assert.True(SpinWait.SpinUntil(() => editor.FindTextContaining(errorText) is not null, TimeSpan.FromSeconds(2)));
         Assert.Empty(editor.FindFirstDescendant(cf => cf.ByAutomationId("PeriodsList")).AsListBox().Items);
-        editor.Close(); settings.Close();
+        editor.Close(); CloseSettings(settings);
     }
     [Fact]
     public void Save_DuplicateCanonicalProcess_ShowsErrorWithoutCrashingOrChangingRule()
@@ -292,6 +305,6 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         Assert.NotNull(error!.FindTextContaining("already has a rule"));
         error!.FindButton("OK").Invoke();
         Assert.Equal("Original", db.GetRules().Single(r => r.ProcessName == "duplicatehelper").DisplayName);
-        settings.Close();
+        CloseSettings(settings);
     }
 }
