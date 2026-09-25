@@ -87,8 +87,14 @@ try {
         }
     }
     Copy-Item LICENSE $output
-    Copy-Item packaging/README.txt $output
-    Copy-Item packaging/THIRD-PARTY-NOTICES.txt $output
+    # Git clean status compares normalized content, so a clean worktree may still
+    # contain CRLF bytes. Canonicalize only our package prose; upstream texts below
+    # remain verbatim, including their original whitespace and encoding.
+    foreach ($name in @('README.txt', 'THIRD-PARTY-NOTICES.txt')) {
+        $text = [IO.File]::ReadAllText((Join-Path $root "packaging/$name"))
+        $text = $text.Replace("`r`n", "`n").Replace("`r", "`n")
+        [IO.File]::WriteAllText((Join-Path $output $name), $text, [Text.UTF8Encoding]::new($false))
+    }
     Copy-Item packaging/licenses $output -Recurse
     $files = @(Get-ChildItem $output -File -Recurse | Sort-Object FullName | ForEach-Object {
         [ordered]@{ path=[IO.Path]::GetRelativePath($output,$_.FullName).Replace('\','/'); size=$_.Length; sha256=(Get-FileHash $_.FullName -Algorithm SHA256).Hash.ToLowerInvariant() }
