@@ -2,7 +2,7 @@
 
 This is the current product contract distilled from the approved [architecture](SCREEN_TIME_ARCHITECTURE_PLAN.md), [Phase 1](PHASE1_IMPLEMENTATION.md)–[Phase 4](PHASE4_IMPLEMENTATION.md) records, and the owner's approved remaining-product decisions restated on 2026-09-24. See [DECISIONS.md](DECISIONS.md) for provenance. It does not authorize implementing the next phase.
 
-Phases 1–4 are complete, validated, committed and pushed per the owner. Remaining requirements below are approved future scope, not claims that they already exist. Historical reports retain their original validation limits and working-tree status; current source/tests establish actual behavior. Upstream TimeGuard README features are not the ScreenTime contract.
+Phases 1–5 are approved and integrated through `378f9fbf245193089ce55271a10e7c0079a5c882` (PR #1). The [final independent Phase 5 review](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5312587369) clears `476bb76`. Historical reports retain their original validation limits and writing-time status; current source/tests establish actual behavior. Upstream TimeGuard README features are not the ScreenTime contract.
 
 ## Product and safety boundary
 
@@ -32,9 +32,9 @@ Phases 1–4 are complete, validated, committed and pushed per the owner. Remain
 - Confirmed exit/crash of all captured instances completes the episode early; partial exit leaves only surviving captures eligible. Inaccessible observations are not proof of exit. Consumed episode history survives restart and rule recreation, preventing another grant for that quota date.
 - Persist expiry before hard termination at the durable deadline, confirm real exit and retry failures without extending time. A carried expired survivor must stop even if a new day's allowance exists. After completion, new launches depend on current downtime/quota; fresh quota never overrides downtime.
 
-## Phase 5: gaming-safe notifications (owner accepted; final review pending)
+## Phase 5: gaming-safe notifications (approved and merged)
 
-The WPF implementation, receipt model, validation evidence and owner's manual procedure are recorded in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md). Following the initial ten-notice result, the owner passed final refined-notification/full-countdown acceptance during active Apex firing-range gameplay on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`; see [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). This is owner-observed acceptance, not a measured performance guarantee. The minimal preview-label and notification-copy follow-ups await final independent review; PR #1 remains unmerged.
+The WPF implementation, receipt model, validation evidence and owner's manual procedure are recorded in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md). Following the initial ten-notice result, the owner passed final refined-notification/full-countdown acceptance during active Apex firing-range gameplay on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`; see [the acceptance record](PHASE5_APEX_ACCEPTANCE.md). This is owner-observed acceptance, not a measured performance guarantee. The minimal preview-label and notification-copy follow-ups passed final independent review before PR #1 merged.
 
 The original interactive/topmost TimeGuard warning caused visible Apex disruption. Gaming-safe notifications are non-negotiable; the precise contribution of focus and rendering remains a measurement question.
 
@@ -47,12 +47,14 @@ The original interactive/topmost TimeGuard warning caused visible Apex disruptio
 - Show a compact passive live countdown during at most the final 60 seconds before the persisted original grace deadline, updating once per second. Consume committed deadline facts only; no per-second database/persistence writes, timing extension, acknowledgement or enforcement ownership. Late delivery/restart uses only the actual remaining portion of that minute; exit, stale state or deadline removes the countdown. Preserve click-through, no activation/input capture and no buttons. Phase 4 still commits expiry before exact-instance hard enforcement.
 - Apex validation starts in training/non-ranked gameplay. Record foreground HWND, minimization/focus, mouse/keyboard/controller behavior, dismissal and first/subsequent frame-time effects on the target setup. Ranked validation is a later gate; never provoke a ranked penalty as a test. Helper/automation success alone does not establish Apex acceptance.
 
-## Phase 6: tray/status and protected actions (approved, not implemented here)
+## Phase 6: tray/status and protected actions
 
 - Read-only usage/status is available without a password. Include remaining allowance, current restriction/grace state, grace time remaining, next downtime and next availability; present fresh-but-unavailable quota truthfully during downtime.
+- D22 approves a collection of configured enabled applications: one or many apps use the same UI, independently accounted/enforced. No aggregate caps, shared grace, cross-app enforcement, overall budgets or passive unrelated-app tracking. Keep a stable shared-brand tray icon, concise one-app or count/restricted-count tooltip, compact per-app rows with read-only detail, bounded scrolling for many apps, and urgency/running/remaining/name sorting. Status countdown uses the original committed deadline only.
 - Settings and Exit require the protected password. Gate weakening actions at the command boundary, not merely by hiding UI controls. Preserve password hashing; wrong/cancelled authentication must not change policy or stop monitoring.
 - Closing a panel does not stop enforcement. Status consumes policy snapshots; it does not own enforcement state. Expanded history/dashboard or multi-app selection UX is not a prerequisite.
 - Add protected notification preferences with Standard / Minimal / Custom presets, per-milestone enable/disable controls, configurable final-countdown visibility/duration, default urgency colors and optional owner-selected Info/Warning/Critical colors with reset-to-default. Countdown duration stays within the approved final-minute maximum. Preferences never weaken enforcement or change quota/grace timing. This is approved Phase 6 scope; its settings UI is not part of Phase 5.
+- Standard preserves all existing notices, the 60-second countdown and default colors. Minimal retains grace-start, final countdown and blocked/expired notices; Custom allows each milestone separately. Preview uses example display facts only. Preference storage and UI delivery cannot hold the policy writer lock or rebase accounting. No unconditional Apex rerun is required for Phase 6: independent review determines whether actual rendering changes justify a new game gate; unresolved explicit physical UX gates remain blocking.
 
 ## Deferred unless explicitly promoted
 

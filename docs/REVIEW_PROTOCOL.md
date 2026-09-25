@@ -2,6 +2,16 @@
 
 This protocol replaces routine human implementation/review handoffs. Product intent is in [PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md), approved choices in [DECISIONS.md](DECISIONS.md), and detailed phase scope in [architecture section 11](SCREEN_TIME_ARCHITECTURE_PLAN.md#11-phased-implementation-plan). Reports are navigation aids, never proof. No API dependency or custom orchestrator is required.
 
+## Owner-authorized Phases 6–9 delivery
+
+The owner's 2026-09-25 objective authorizes routine implementation, validation, commits/pushes, PRs, independent review, remediation/re-review, CI verification, and normal merge commits into `screentime-dev`, continuing to the next phase without human relay. This supersedes the historical setup's no-push-before-approval text for the current goal. Each mutable implementation uses an isolated phase worktree; a separate reviewer context inspects a worktree pinned to the exact remote head and posts directly to GitHub. The implementation agent retrieves findings from GitHub. Preserve `master`, never push `upstream`, and do not rewrite or squash approved history.
+
+All ten merge gates must pass: current phase only; required local build/tests; GitHub CI; independent actual-diff/source/test review; zero unresolved blockers; every actionable correction re-reviewed on the exact head; no open required manual gate; installed TimeGuard preservation; target only `screentime-dev`; normal merge commit preserving history. Reverify exact head/base and fetch the resulting integration SHA after merge.
+
+Escalate only for genuine product conflicts/unspecified important behavior; explicitly required physical UX/gaming/display/installation/hardware gates that automation cannot establish; destructive/security-sensitive real-machine actions; credentials/signing/secrets/release publication/store authorization; material unresolved architectural disagreement; unreliable required validation after reasonable diagnosis/retries; material scope expansion; or subjective visual choices without an approved answer. Complete safe independent work before stopping at the narrow gate. Routine phase completion, PR readiness, green CI, remediation, or merge readiness are not approval requests.
+
+Phase 6 does not automatically require rerunning accepted Apex gameplay checks. Independent review must assess actual rendering changes and identify any justified new manual game gate. Automated tray/password/status and native passive-notification regressions remain required; automation cannot claim unperformed hardware/game evidence. Historical reports remain unedited.
+
 ## Roles and independence
 
 **Implementer:** implement only the requested phase, add meaningful tests, validate, commit/push a phase branch, open a PR into `screentime-dev`, obtain independent review, retrieve findings directly from GitHub, remediate and request re-review until no material findings remain. Then validate the final revision and merge under the gates below.

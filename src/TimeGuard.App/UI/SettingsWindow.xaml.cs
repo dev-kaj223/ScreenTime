@@ -14,18 +14,21 @@ public partial class SettingsWindow : Window
 {
     private readonly DatabaseService _db;
     private readonly RuntimeOptions _runtime;
+    private readonly NotificationPreferenceStore _preferences;
     private ObservableCollection<AppRule> _rules = [];
 
     private record UsageRow(string ProcessName, string UsageMinutesDisplay, bool Blocked);
 
-    public SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null)
+    internal SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null)
     {
         InitializeComponent();
         _db = db;
         _runtime = runtime ?? RuntimeOptions.Development();
+        _preferences = new NotificationPreferenceStore(_runtime.Paths);
         LoadRules();
         LoadUsage();
         LoadGlobalCap();
+        NotificationEditor.Load(_preferences.Load());
         StartupCheckBox.IsEnabled = _runtime.AllowsStartup;
         StartupCheckBox.IsChecked = StartupHelper.IsRegistered(_runtime);
     }
@@ -242,7 +245,13 @@ public partial class SettingsWindow : Window
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
-        if (int.TryParse(OverallCapBox.Text, out var cap))
+        try { _preferences.Save(NotificationEditor.Read()); }
+        catch (Exception ex) when (ex is ArgumentException or System.IO.IOException or UnauthorizedAccessException)
+        {
+            WpfMessageBox.Show(this, ex.Message, "Notification preferences", MessageBoxButton.OK);
+            return;
+        }
+        if (int.TryParse(OverallCapBox.Text, out var cap) && cap.ToString() != (_db.GetSetting("OverallDailyLimitMinutes") ?? "0"))
             _db.SetSetting("OverallDailyLimitMinutes", cap.ToString());
 
         DialogResult = true;

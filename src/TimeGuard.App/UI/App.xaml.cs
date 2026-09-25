@@ -25,6 +25,11 @@ public partial class App : WpfApplication
     private EventWaitHandle? _noticeEvent;
     private TimeGuard.Models.NotificationRequest? _previewNotice;
     private int _previewIndex;
+    private TrayIconService? _tray;
+    private SettingsAccessService? _access;
+    private EventWaitHandle? _statusEvent;
+    private EventWaitHandle? _exitEvent;
+    private TimeGuard.Models.NotificationPreferences _notificationPreferences = TimeGuard.Models.NotificationPreferences.Standard;
 
     protected override void OnStartup(StartupEventArgs e)
     {
@@ -66,10 +71,15 @@ public partial class App : WpfApplication
                 ? new TestProcessScope(_runtime.Paths, _logger).Contains : null;
             _monitor = new MonitorService(_db, new RulesEngine(), config, _logger,
                 new WindowsProcessMonitor(_logger, targetScope), new WindowsProcessTerminator(targetScope));
+            _notificationPreferences = new NotificationPreferenceStore(_runtime.Paths, _logger).Load();
             _notifications = new WpfNotificationService(
                 () => _monitor.TryReadNotification(out var request) ? request : null,
                 _monitor.IsNotificationCurrent, _logger,
-                e.Args.Contains("--notice-diagnostics") ? WriteNoticeDiagnostic : null);
+                e.Args.Contains("--notice-diagnostics") ? WriteNoticeDiagnostic : null, () => _notificationPreferences);
+            _access = new SettingsAccessService(() => (_db.GetSetting("PasswordHash") ?? "", _db.GetSetting("PasswordSalt") ?? ""),
+                () => { var prompt = new UI.PasswordPromptWindow(_db); return prompt.ShowDialog() == true ? prompt.Password : null; },
+                OpenAuthorizedSettings, () => StopAndShutdownAsync(0), () => _stopping);
+            _tray = new TrayIconService(() => _monitor.Status, OpenSettings, () => _access.ExitAsync());
 
             _power = new PowerSessionHelper(_monitor);
             _monitor.Start();
@@ -80,12 +90,16 @@ public partial class App : WpfApplication
                 // Local named signals scoped to this profile replace global keyboard input in tests.
                 _settingsEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.SettingsEventName);
                 _stopEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.StopEventName);
+                _statusEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.StatusEventName);
+                _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.ExitEventName);
                 _testCommands = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
                 _testCommands.Tick += async (_, _) =>
                 {
                     if (_stopEvent.WaitOne(0)) await StopAndShutdownAsync(0);
                     else if (!_stopping && _settingsEvent.WaitOne(0))
                         _ = Dispatcher.BeginInvoke(new Action(OpenSettings));
+                    else if (!_stopping && _statusEvent.WaitOne(0)) _tray.OpenStatus();
+                    else if (!_stopping && _exitEvent.WaitOne(0)) await _access.ExitAsync();
                 };
                 _testCommands.Start();
             }
@@ -127,6 +141,7 @@ public partial class App : WpfApplication
         _stopping = true;
         _testCommands?.Stop();
         _notifications?.Dispose();
+        _tray?.Dispose();
         _power?.Dispose();
         _monitor?.Dispose();
         if (_monitor is not null)
@@ -177,11 +192,18 @@ public partial class App : WpfApplication
 
     private void OpenSettings()
     {
-        if (_stopping) return;
-        var prompt = new UI.PasswordPromptWindow(_db!);
-        if (prompt.ShowDialog() != true || _stopping) return;
+        _access?.OpenSettings();
+    }
+
+    private void OpenAuthorizedSettings()
+    {
+        var before = System.Text.Json.JsonSerializer.Serialize(_db!.LoadConfig().Rules);
         new UI.SettingsWindow(_db!, _runtime).ShowDialog();
-        if (!_stopping) _monitor?.ReloadConfig(_db!.LoadConfig());
+        if (_stopping) return;
+        _notificationPreferences = new NotificationPreferenceStore(_runtime.Paths, _logger).Load();
+        var config = _db.LoadConfig();
+        // Presentation-only settings never rebase measured usage or invalidate policy facts.
+        if (before != System.Text.Json.JsonSerializer.Serialize(config.Rules)) _monitor?.ReloadConfig(config);
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -190,6 +212,7 @@ public partial class App : WpfApplication
         _stopping = true;
         _testCommands?.Stop();
         _notifications?.Dispose();
+        _tray?.Dispose();
         // Shutdown can also originate from WPF/session exit. Enforcement never waits
         // on this dispatcher, so joining the worker here cannot create a UI deadlock.
         if (_monitor is not null)
@@ -201,6 +224,8 @@ public partial class App : WpfApplication
         _settingsEvent?.Dispose();
         _stopEvent?.Dispose();
         _noticeEvent?.Dispose();
+        _statusEvent?.Dispose();
+        _exitEvent?.Dispose();
         if (_ownsMutex) _singleInstanceMutex?.ReleaseMutex();
         _singleInstanceMutex?.Dispose();
         _logger.TryWrite("Information", "ApplicationStopped");

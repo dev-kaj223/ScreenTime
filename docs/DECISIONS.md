@@ -36,6 +36,16 @@ Use the current approved requirements and this ledger for product intent, the ar
 
 ## Delivery decisions (2026-09-24)
 
+**Current owner refinement, 2026-09-25:** Phase 5 is merged in PR #1 at `378f9fbf245193089ce55271a10e7c0079a5c882`; [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5312587369) clears `476bb76`. Historical pending/no-merge statements below and in phase reports describe their writing time. For Phases 6–9 the owner explicitly authorizes autonomous implementation, independent GitHub review, remediation, CI verification and normal merge commits into `screentime-dev` when every gate passes. The old setup push-approval restriction is satisfied/superseded for this goal. `master` and `upstream` remain untouched; no rewriting or squashing approved phase history. See the current [delivery gates](REVIEW_PROTOCOL.md#owner-authorized-phases-69-delivery).
+
+### D22 — Collection-based presentation, independent policy (2026-09-25)
+
+Owner-approved Phase 6 refinement: the status model represents a collection of configured enabled apps; each app remains independently accounted and enforced; one or many apps render through the same status UI. Multi-app presentation does not create aggregate caps, shared grace, cross-app enforcement, overall usage budgets, cross-app quota coordination or passive unrelated-app tracking. The Apex MVP is the one-row case. Shared branding supplies a stable tray identity; state belongs in truthful per-app rows and concise tooltips. This supersedes older wording that deferred multi-app presentation itself, while coordinated policy remains deferred.
+
+Routine presentation choice under D21: Standard retains all notices and defaults; Minimal retains grace start, final countdown and blocked/expired notices; Custom independently controls the six existing milestones. Countdown selection is 1–60 seconds and can be disabled. Presets only affect presentation and are easy to revise without policy/data migration.
+
+### Historical setup decisions
+
 - Replace routine human handoffs with implement → test → push phase branch → PR into `screentime-dev` → independent Codex review → remediation/re-review → final validation → merge. GitHub is the shared review record; an implementer's report is never review proof.
 - Prefer repository Codex Code Review when enabled; otherwise use an independent reviewer context and a separate worktree pinned to the PR head. The initial reviewer does not modify production code. No custom orchestrator, API dependency or API key is needed.
 - Human input is reserved for genuine product conflicts/unknowns, approval-required destructive/security actions, unresolved architectural disagreement, unreliable required validation after diagnosis, or material scope expansion. See the protocol for details.
@@ -44,4 +54,4 @@ Use the current approved requirements and this ledger for product intent, the ar
 
 ## Historical validation limits to preserve
 
-The Phase 4 report records 174 passing Core tests, four passing rebuilt helper scenarios and a passing real 20-minute helper check. It also records blocked interactive UI validation caused by denied desktop input; physical sleep/hibernate and real-calendar midnight were not claimed. These are historical observations, not permission to skip future gates or to overturn the owner's phase-completion statement. Each future PR must supply its own current validation evidence. D18 records final owner-observed Phase 5 firing-range acceptance on the named head; final independent review of the wording follow-ups and Phase 6 tray acceptance remain open.
+The Phase 4 report records 174 passing Core tests, four passing rebuilt helper scenarios and a passing real 20-minute helper check. It also records blocked interactive UI validation caused by denied desktop input; physical sleep/hibernate and real-calendar midnight were not claimed. These are historical observations, not permission to skip future gates or to overturn the owner's phase-completion statement. Each future PR must supply its own current validation evidence. D18 records final owner-observed Phase 5 firing-range acceptance on the named head; the final review is linked above. Phase 6 supplies its own tray validation and any reviewer-required physical gates.
