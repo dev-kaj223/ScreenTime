@@ -57,7 +57,7 @@ public class AppFixture : IDisposable
 
     private void Launch()
     {
-        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "App", "TimeGuard.exe"))
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "App", "ScreenTime.exe"))
         { UseShellExecute = false };
         info.ArgumentList.Add("--test-profile");
         info.ArgumentList.Add(Runtime.Paths.Root);

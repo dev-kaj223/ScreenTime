@@ -33,7 +33,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
     {
         _fx.RequestSettings();
 
-        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Parent Access");
+        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
 
         var passwordBoxes = prompt.FindAllDescendants(cf =>
             cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit));
@@ -43,7 +43,7 @@ public class RuleEditWindowTests : IClassFixture<SeededAppFixture>
         }
 
         prompt.FindButton("Unlock").Invoke();
-        return _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings");
+        return _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
     }
 
     private FlaUI.Core.AutomationElements.Window OpenRuleEditWindow(

@@ -8,6 +8,8 @@ The owner confirmed on 2026-09-24 that Phases 1–4 are complete, validated, com
 
 Use the current approved requirements and this ledger for product intent, the architecture for detailed phase design, and source/tests for implementation evidence. Later approved decisions can refine earlier design proposals; record the change and rationale here. An implementation or test is not authorization to change the product. Genuine contradictions or unspecified product behavior require an owner decision; routine implementation choices do not.
 
+Phase 7 is integrated by normal merge `cb2d6d08a519cc8fa779e14124d3588f1163cae5` (PR #3). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/3#pullrequestreview-5314429938) cleared `1758006` with 218 Core tests, 64 UI tests, successful CI and preservation checks, a verified real 20-minute original-deadline scenario and five-minute resource soak, and no additional manual gate. The historical [Phase 7 report](PHASE7_IMPLEMENTATION.md) keeps its writing-time validation limits.
+
 ## Accepted product choices
 
 Current integration also includes Phase 6 at `899ed1344137472bed5dcf1e5e871504b2e719b0` (PR #2). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/2#pullrequestreview-5313944356) cleared `4951d1a` with 204 Core/58 UI tests, CI/preservation success and no remaining manual gate. Earlier reports keep their writing-time evidence and limitations.
@@ -45,6 +47,10 @@ Current integration also includes Phase 6 at `899ed1344137472bed5dcf1e5e871504b2
 Owner-approved Phase 6 refinement: the status model represents a collection of configured enabled apps; each app remains independently accounted and enforced; one or many apps render through the same status UI. Multi-app presentation does not create aggregate caps, shared grace, cross-app enforcement, overall usage budgets, cross-app quota coordination or passive unrelated-app tracking. The Apex MVP is the one-row case. Shared branding supplies a stable tray identity; state belongs in truthful per-app rows and concise tooltips. This supersedes older wording that deferred multi-app presentation itself, while coordinated policy remains deferred.
 
 Routine presentation choice under D21: Standard retains all notices and defaults; Minimal retains grace start, final countdown and blocked/expired notices; Custom independently controls the six existing milestones. Countdown selection is 1–60 seconds and can be disabled. Presets only affect presentation and are easy to revise without policy/data migration.
+
+### D23 — Filled-base hourglass (2026-09-25)
+
+The owner explicitly selected **option B — Filled base** from the two original vector candidates shown at 16/32 pixels and larger header size, with dark tray/notice mockups: "I select option B - Fill base". This closes the H8 visual-choice gate. The selected neutral `#D7DEE9` mark is the exact B geometry in the comparison, retained centrally in `Branding/ScreenTimeBranding.xaml` with its 32-DIP canvas. The same resource feeds WPF windows/notices, tray icons and the generated multi-size executable ICO. No other visual redesign, notification behavior, policy, profile or startup change is authorized by this choice. Final asset validation and independent review remain required; selection alone is not merge clearance.
 
 ### Historical setup decisions
 

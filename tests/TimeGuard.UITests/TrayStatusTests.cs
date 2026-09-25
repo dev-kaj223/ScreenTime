@@ -45,7 +45,7 @@ public class TrayStatusTests
         var panel = fx.App.WaitForWindow(fx.Automation, "ScreenTime");
         Assert.Contains(panel.FindAllDescendants(), e => e.Name == "Owned helper");
         Assert.Contains(panel.FindAllDescendants(), e => e.Name == "Example available");
-        Assert.DoesNotContain(fx.App.GetAllTopLevelWindows(fx.Automation), w => w.Title == "Parent Access");
+        Assert.DoesNotContain(fx.App.GetAllTopLevelWindows(fx.Automation), w => w.Title == "Protected Access");
         Signal(fx.Runtime.StatusEventName); Thread.Sleep(300);
         Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title == "ScreenTime"));
         AssertFullyOnscreen(panel);
@@ -85,7 +85,7 @@ public class TrayStatusTests
         var config = System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig());
         foreach (var signal in new[] { fx.Runtime.SettingsEventName, fx.Runtime.ExitEventName })
         {
-            Signal(signal); var prompt = fx.App.WaitForWindow(fx.Automation, "Parent Access");
+            Signal(signal); var prompt = fx.App.WaitForWindow(fx.Automation, "Protected Access");
             EnterPassword(prompt, "wrong-password");
             Assert.True(SpinWait.SpinUntil(() => prompt.FindAllDescendants().Any(e => e.Name == "Incorrect password."), TimeSpan.FromSeconds(2)));
             Assert.False(fx.App.HasExited);
@@ -93,7 +93,7 @@ public class TrayStatusTests
             Assert.Equal(config, System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig()));
         }
         Signal(fx.Runtime.ExitEventName);
-        EnterPassword(fx.App.WaitForWindow(fx.Automation, "Parent Access"), AppFixture.TestPassword);
+        EnterPassword(fx.App.WaitForWindow(fx.Automation, "Protected Access"), AppFixture.TestPassword);
         Assert.True(SpinWait.SpinUntil(() => fx.App.HasExited, TimeSpan.FromSeconds(5)));
     }
 
@@ -102,8 +102,8 @@ public class TrayStatusTests
     {
         using var fx = new SeededAppFixture();
         var before = System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig());
-        fx.RequestSettings(); EnterPassword(fx.App.WaitForWindow(fx.Automation, "Parent Access"), AppFixture.TestPassword);
-        var settings = fx.App.WaitForWindow(fx.Automation, "TimeGuard Settings");
+        fx.RequestSettings(); EnterPassword(fx.App.WaitForWindow(fx.Automation, "Protected Access"), AppFixture.TestPassword);
+        var settings = fx.App.WaitForWindow(fx.Automation, "ScreenTime Settings");
         settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(ControlType.TabItem))).AsTabItem().Select();
         settings.FindFirstDescendant(cf => cf.ByAutomationId("PresetBox")).AsComboBox().Select("Minimal");
         settings.FindButton("Preview").Invoke();
@@ -115,8 +115,8 @@ public class TrayStatusTests
         var store = new NotificationPreferenceStore(fx.Runtime.Paths);
         Assert.Equal(NotificationPreferences.Minimal, store.Load());
         Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig()));
-        fx.RequestSettings(); EnterPassword(fx.App.WaitForWindow(fx.Automation, "Parent Access"), AppFixture.TestPassword);
-        settings = fx.App.WaitForWindow(fx.Automation, "TimeGuard Settings");
+        fx.RequestSettings(); EnterPassword(fx.App.WaitForWindow(fx.Automation, "Protected Access"), AppFixture.TestPassword);
+        settings = fx.App.WaitForWindow(fx.Automation, "ScreenTime Settings");
         settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(ControlType.TabItem))).AsTabItem().Select();
         settings.FindButton("Reset to defaults").Invoke();
         settings.FindButton("Cancel").Invoke();

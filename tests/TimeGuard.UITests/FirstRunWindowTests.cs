@@ -19,14 +19,14 @@ public class FirstRunWindowTests : IDisposable
     [Fact]
     public void App_ShowsFirstRunWindow_OnFreshDb()
     {
-        var win = _fx.App.WaitForWindow(_fx.Automation, "Welcome to TimeGuard");
+        var win = _fx.App.WaitForWindow(_fx.Automation, "Welcome to ScreenTime");
         Assert.Contains("Welcome", win.Title);
     }
 
     [Fact]
     public void FirstRun_MismatchedPasswords_ShowsError()
     {
-        var win = _fx.App.WaitForWindow(_fx.Automation, "Welcome to TimeGuard");
+        var win = _fx.App.WaitForWindow(_fx.Automation, "Welcome to ScreenTime");
 
         // Type mismatched passwords using keyboard — PasswordBoxes don't expose Text via UIA
         var boxes = win.FindAllDescendants(cf =>
@@ -53,7 +53,7 @@ public class FirstRunWindowTests : IDisposable
     [Fact]
     public void FirstRun_ValidPassword_ClosesFirstRunWindow()
     {
-        var win = _fx.App.WaitForWindow(_fx.Automation, "Welcome to TimeGuard");
+        var win = _fx.App.WaitForWindow(_fx.Automation, "Welcome to ScreenTime");
 
         var boxes = win.FindAllDescendants(cf =>
             cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit));
@@ -86,7 +86,7 @@ public class FirstRunWindowTests : IDisposable
             {
                 var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
                 closed = !windows.Any(w =>
-                    w.Title?.Contains("Welcome to TimeGuard", StringComparison.OrdinalIgnoreCase) == true);
+                    w.Title?.Contains("Welcome to ScreenTime", StringComparison.OrdinalIgnoreCase) == true);
                 if (closed) break;
             }
             catch { /* process may be transitioning */ }

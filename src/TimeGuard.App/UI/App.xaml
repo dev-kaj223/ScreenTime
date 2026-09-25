@@ -5,7 +5,7 @@
     <Application.Resources>
         <ResourceDictionary>
         <ResourceDictionary.MergedDictionaries>
-            <ResourceDictionary Source="/TimeGuard;component/Branding/ScreenTimeBranding.xaml"/>
+            <ResourceDictionary Source="/ScreenTime;component/Branding/ScreenTimeBranding.xaml"/>
         </ResourceDictionary.MergedDictionaries>
         <!-- Base colors -->
         <SolidColorBrush x:Key="AccentBrush"     Color="#E05A2B"/>
