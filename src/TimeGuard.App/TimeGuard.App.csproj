@@ -4,6 +4,8 @@
     <OutputType>WinExe</OutputType>
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
+    <RuntimeIdentifiers>win-x64</RuntimeIdentifiers>
+    <RestorePackagesWithLockFile>true</RestorePackagesWithLockFile>
     <ImplicitUsings>enable</ImplicitUsings>
     <UseWPF>true</UseWPF>
     <UseWindowsForms>true</UseWindowsForms>
@@ -13,6 +15,11 @@
     <Title>ScreenTime</Title>
     <Description>Local selected-app screen time for Windows.</Description>
     <ApplicationIcon>Branding\ScreenTime.ico</ApplicationIcon>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(ScreenTimeDistribution)' == 'true'">
+    <DefineConstants>$(DefineConstants);SCREENTIME_DISTRIBUTION</DefineConstants>
+    <RuntimeFrameworkVersion>8.0.31</RuntimeFrameworkVersion>
   </PropertyGroup>
 
   <!-- App.xaml lives in UI/ subfolder; override its build action explicitly -->

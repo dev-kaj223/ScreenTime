@@ -8,6 +8,9 @@ Phase 6 is integrated by normal merge `899ed1344137472bed5dcf1e5e871504b2e719b0`
 
 Phase 7 is integrated by normal merge `cb2d6d08a519cc8fa779e14124d3588f1163cae5` (PR #3). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/3#pullrequestreview-5314429938) cleared `1758006` with 218 Core tests, 64 UI tests, successful CI and preservation checks, a verified real 20-minute original-deadline scenario and five-minute resource soak, and no additional manual gate. The historical [Phase 7 report](PHASE7_IMPLEMENTATION.md) keeps its writing-time validation limits.
 
+
+Phase 8 is integrated by normal merge `0224f432b65095db4dee59522173ec0267f3e0cb` (PR #4). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/4#pullrequestreview-5318740660) cleared `6b48ac4`, closing H8/P8-G1 with approved B artwork, full author Core 218/UI 69, fresh reviewer Core 218/affected UI 6, CI and preservation evidence. The historical [Phase 8 report](PHASE8_IMPLEMENTATION.md) retains writing-time limits. A subsequent integration-CI timing assertion failure is tracked as [Phase 9 validation follow-up P9-V1](https://github.com/dev-kaj223/ScreenTime/pull/4#issuecomment-5834049344), not erased from prior history.
+
 ## Product and safety boundary
 
 - Lightweight, local-only, offline-capable Windows ScreenTime-style app, in the interactive user's session. Evolve the existing .NET/WPF app rather than adding a privileged service or new framework.
@@ -72,6 +75,13 @@ The original interactive/topmost TimeGuard warning caused visible Apex disruptio
 - Use ScreenTime for user-facing naming, titles, executable/product metadata and artifact names. Keep namespaces, project paths, profiles and storage identities stable unless a minimal output-name change is needed for `ScreenTime.exe`.
 - Replace the centralized interim mark with the owner-selected hourglass; WPF windows, notices, tray and exported executable/package icons must derive from that shared artwork. The owner explicitly selected **option B — Filled base** on 2026-09-25 (D23), retaining the neutral `#D7DEE9` geometry shown in the comparison.
 - Preserve automation IDs, protected commands, passive notification behavior and existing layout. This is naming/branding polish, not a broad UI redesign or Phase 9 distribution/profile change. Keep upstream license attribution.
+
+## Phase 9: distribution preparation
+
+- Build an unsigned self-contained win-x64 portable package reproducibly from clean committed source, with correct ScreenTime metadata/resources and actual bundled license/NOTICE texts. Preserve upstream attribution. See [release procedure](RELEASE.md).
+- Distribution-only selection uses `%AppData%\ScreenTime`; ordinary Debug/Release remains Development and explicit Test stays disposable. Never launch/import legacy TimeGuard or fall back to its profile. Autostart is not selected and remains disabled; no watchdog or scheduled task.
+- Verify the extracted artifact, its runtime/native/dependency versions, fresh security audit, default selection via a read-only seam, offline-capable local operation, protected commands, exact-owned enforcement, original grace across restart and clean shutdown. Keep real installed/profile preservation evidence and label seeded versus real elapsed timing checks.
+- Package CI uploads candidate artifacts only. Signing, public publication, owner credentials, destructive installation/uninstall and real-user migration remain separate gates; complete safe preparation without performing those actions.
 
 ## Deferred unless explicitly promoted
 

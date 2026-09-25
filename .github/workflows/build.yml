@@ -1,78 +1,33 @@
-name: Build & Package
-
+name: ScreenTime package
 on:
   push:
-    branches: [ master ]
-    tags:     [ 'v*' ]
+    branches: [ screentime-dev ]
   pull_request:
-    branches: [ master ]
-
+    branches: [ screentime-dev ]
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-  build:
+  package:
+    name: Build portable package
     runs-on: windows-latest
-    permissions:
-      contents: write   # needed to create GitHub Releases and upload assets
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
+      - uses: actions/checkout@v4
         with:
-          dotnet-version: '8.0.x'
-
-      - name: Restore
-        run: dotnet restore
-
-      - name: Build
-        run: dotnet build --no-restore -c Release
-
-      - name: Unit Tests
-        run: dotnet test tests/TimeGuard.Tests --no-build -c Release --logger "console;verbosity=normal"
-
-      - name: Publish (single-file win-x64)
-        run: >
-          dotnet publish src/TimeGuard.App
-          -c Release
-          -r win-x64
-          --self-contained
-          -p:PublishSingleFile=true
-          -p:IncludeNativeLibrariesForSelfExtract=true
-          -p:DebugType=None
-          -p:DebugSymbols=false
-          -o publish/
-
-      - name: Package release zip
+          fetch-depth: 0
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+      - name: Build and audit isolated package
         shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path release | Out-Null
-          # IncludeNativeLibrariesForSelfExtract bundles all native DLLs into the exe.
-          # DebugType=None suppresses PDB files. Zip contains only ScreenTime.exe.
-          Compress-Archive -Path publish/ScreenTime.exe -DestinationPath release/ScreenTime-win-x64.zip -Force
-          Write-Host "Created release/ScreenTime-win-x64.zip ($([math]::Round((Get-Item release/ScreenTime-win-x64.zip).Length / 1MB, 1)) MB)"
-
-      - name: Upload artifact
+        run: ./publish.ps1 -BuildLabel ci
+      - name: Verify package manifest and safe profile probe
+        shell: pwsh
+        run: ./tools/Test-ReleasePackage.ps1 -Package artifacts/ci/ScreenTime-win-x64.zip
+      - name: Upload candidate (no tags or public releases)
         uses: actions/upload-artifact@v4
         with:
-          name: ScreenTime-win-x64
-          path: release/ScreenTime-win-x64.zip
+          name: ScreenTime-win-x64-candidate
+          path: artifacts/ci/*
+          if-no-files-found: error
           retention-days: 30
-
-      # ── GitHub Release (only on version tags, e.g. v1.0.0) ──────────────────
-      - name: Create GitHub Release
-        if: startsWith(github.ref, 'refs/tags/v')
-        uses: softprops/action-gh-release@v2
-        with:
-          name: "ScreenTime ${{ github.ref_name }}"
-          body: |
-            ## ScreenTime ${{ github.ref_name }}
-
-            Self-contained Windows x64 build — no .NET runtime required.
-
-            **Install:**
-            1. Download and extract `ScreenTime-win-x64.zip` to a permanent folder (e.g. `C:\Program Files\ScreenTime\`)
-            2. Run `ScreenTime.exe`
-          files: release/ScreenTime-win-x64.zip
-          draft: false
-          prerelease: ${{ contains(github.ref_name, '-') }}

@@ -1,0 +1,40 @@
+ScreenTime distribution notices
+===============================
+ScreenTime derives from TimeGuard by debmis. The original MIT copyright and
+license are preserved in LICENSE. Source: https://github.com/debmis/TimeGuard
+ScreenTime source: https://github.com/dev-kaj223/ScreenTime
+
+The manifest lists the resolved win-x64 application dependency graph, actual
+runtime/native asset names, package versions and content hashes. Build/test-only
+packages are not included. Empty asset placeholders can appear in the graph;
+the file manifest is the authoritative list of delivered files.
+
+Dapper 2.1.35: Copyright 2019 Stack Exchange, Inc.; Apache-2.0.
+License source: DapperLib/Dapper commit 360367ca5475425944fb390433cb0f1817ad2dcb,
+License.txt (included as licenses/Dapper-LICENSE.txt, including its logo terms).
+The complete Apache-2.0 license is also included as licenses/Apache-2.0.txt.
+
+SQLitePCLRaw 2.1.12: Copyright 2014-2024 SourceGear, LLC; Apache-2.0.
+Original LICENSE.TXT and NOTICE.TXT from ericsink/SQLitePCL.raw tag v2.1.12 are
+included verbatim. The upstream NOTICE includes the SQLite public-domain
+notice and notices for optional components; their inclusion does not claim
+those optional components (such as SQLCipher) are shipped by this package.
+
+OxyPlot 2.1.2: Copyright (c) 2014 OxyPlot contributors; MIT.
+License source: oxyplot/oxyplot commit 976b84dbf60e142cf47cf0a7ad9f76b25b51ae03,
+LICENSE, included verbatim.
+
+Microsoft.Data.Sqlite 8.0.31: MIT. License source: dotnet/efcore tag v8.0.31,
+LICENSE.txt. Other Microsoft/System NuGet assets use the Microsoft MIT license.
+
+Self-contained Microsoft.NETCore.App and Microsoft.WindowsDesktop.App 8.0.31:
+MIT licenses from their exact win-x64 NuGet runtime packs are included, together
+with the runtime pack THIRD-PARTY-NOTICES.TXT and WPF/Windows Forms notices from
+dotnet/wpf and dotnet/winforms tags v8.0.31. These contain the actual third-party
+license/notice texts, not merely links or package names. Source URLs are:
+https://raw.githubusercontent.com/dotnet/wpf/v8.0.31/THIRD-PARTY-NOTICES.TXT
+https://raw.githubusercontent.com/dotnet/winforms/v8.0.31/THIRD-PARTY-NOTICES.TXT
+
+The original license and notice texts are retained in licenses/. No third-party
+source was modified. Recheck dependencies, bundled runtime support and notices
+before any later public distribution; no signature or public release is implied.

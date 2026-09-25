@@ -44,7 +44,28 @@ public partial class App : WpfApplication
 
         try
         {
-            _runtime = RuntimeOptions.Resolve(e.Args, Environment.GetEnvironmentVariable("TIMEGUARD_TEST_DB"));
+            _runtime = RuntimeOptions.Resolve(e.Args, Environment.GetEnvironmentVariable("TIMEGUARD_TEST_DB"),
+                DistributionIdentity.IsDistribution);
+            if (e.Args.Contains("--describe-runtime"))
+            {
+                // Read-only release probe before logging, mutexes, profiles or startup registration.
+                using var connection = new Microsoft.Data.Sqlite.SqliteConnection("Data Source=:memory:");
+                connection.Open();
+                using var command = connection.CreateCommand();
+                command.CommandText = "SELECT sqlite_version()";
+                Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    Distribution = DistributionIdentity.IsDistribution, Profile = _runtime.Profile.ToString(),
+                    _runtime.Paths.Root, _runtime.Paths.DatabasePath, _runtime.AllowsStartup,
+                    Framework = System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription,
+                    SqliteVersion = (string)command.ExecuteScalar()!,
+                    RuntimeModule = typeof(object).Assembly.Location,
+                    DesktopModule = typeof(Window).Assembly.Location,
+                    SqliteModule = System.Diagnostics.Process.GetCurrentProcess().Modules
+                        .Cast<System.Diagnostics.ProcessModule>().Single(m => m.ModuleName.Equals("e_sqlite3.dll", StringComparison.OrdinalIgnoreCase)).FileName
+                }));
+                Shutdown(); return;
+            }
             _logger = new JsonFileLogger(_runtime);
             _singleInstanceMutex = new Mutex(true, _runtime.MutexName, out _ownsMutex);
             if (!_ownsMutex) { Shutdown(); return; }
@@ -58,6 +79,8 @@ public partial class App : WpfApplication
                 return;
             }
             _db = new DatabaseService(_runtime.Paths);
+            if (_runtime.Profile == RuntimeProfile.Production && _db.GetSetting("SettingsHotkey") is null)
+                _db.SetSetting("SettingsHotkey", "Ctrl+Alt+S");
             var config = _db.LoadConfig();
             if (config.IsFirstRun)
             {
@@ -114,8 +137,12 @@ public partial class App : WpfApplication
                 var hwnd = new System.Windows.Interop.WindowInteropHelper(_helperWindow).Handle;
                 try
                 {
-                    var hotkey = _runtime.Profile == RuntimeProfile.Development
-                        ? "Ctrl+Alt+Shift+S" : config.SettingsHotkey;
+                    var hotkey = _runtime.Profile switch
+                    {
+                        RuntimeProfile.Development => "Ctrl+Alt+Shift+S",
+                        RuntimeProfile.Production => config.SettingsHotkey,
+                        _ => config.SettingsHotkey
+                    };
                     _hotkey = new GlobalHotkeyHelper(hwnd, 1, hotkey, OpenSettings);
                 }
                 catch (Exception ex) { _logger.TryWrite("Error", "HotkeyRegistrationFailed", ex); }
@@ -123,6 +150,11 @@ public partial class App : WpfApplication
         }
         catch (Exception ex)
         {
+            if (e.Args.Contains("--describe-runtime"))
+            {
+                Console.Error.WriteLine($"Runtime description failed: {ex.GetType().Name}: {ex.Message}");
+                Shutdown(1); return;
+            }
             _logger ??= new JsonFileLogger(_runtime);
             _logger.TryWrite("Critical", "ApplicationStartupFailed", ex);
             Shutdown(1);

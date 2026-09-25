@@ -89,7 +89,7 @@ public class AppDataPathsTests
         const string keyPath = @"SOFTWARE\Microsoft\Windows\CurrentVersion\Run";
         using var key = Microsoft.Win32.Registry.CurrentUser.OpenSubKey(keyPath);
         var before = key?.GetValueNames().Order().Select(n => (n, key.GetValue(n))).ToArray();
-        foreach (var runtime in new[] { profile.Runtime, RuntimeOptions.Development() })
+        foreach (var runtime in new[] { profile.Runtime, RuntimeOptions.Development(), RuntimeOptions.Production() })
         {
             StartupHelper.Register(runtime);
             StartupHelper.Unregister(runtime);
