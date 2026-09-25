@@ -1,6 +1,21 @@
 # Phase 5 owner acceptance record
 
-**Status: owner-observed functional non-interference PASS for the previous presentation; refined visuals/countdown and final validation PENDING.** Keep PR #1 unmerged. Automated helper results do not substitute for final owner visual/gameplay acceptance. Use the notice-only preview and commands in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md#owners-manual-apex-acceptance-procedure); it starts no monitor or enforcement. No destructive Apex enforcement or ranked testing is authorized.
+**Status: final owner refined-presentation/countdown Apex firing-range acceptance PASS on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`.** Only the requested preview-label/documentation follow-up awaits final independent review. Keep PR #1 unmerged. Use the notice-only preview and commands in [Phase 5 implementation](PHASE5_IMPLEMENTATION.md#owners-manual-apex-acceptance-procedure); it starts no monitor or enforcement. No destructive Apex enforcement or ranked testing is authorized.
+
+## Final owner acceptance on reviewed head `eca318e`
+
+The owner reports that refined notifications and the **full final-minute live countdown** passed during **active Apex firing-range gameplay** on `eca318ed00c677980bb86d3b62a6bb33fd0268c0`:
+
+- Gameplay performance remained **10/10** in the owner's assessment.
+- No perceived FPS drop or rendering hitch.
+- No focus loss or controller/gameplay interruption.
+- Countdown updated correctly once per second.
+- Urgency colors were clear and appropriately subtle.
+- Dynamic sizing and centered presentation looked good.
+
+This completes the owner's refined-presentation/countdown firing-range acceptance. These are owner observations, not instrumented FPS/frametime measurements or claims about additional display configurations. The exact tested head is supplied; hardware details, raw HWND logs and per-notice measurements were not supplied. No non-ranked match, ranked run or destructive enforcement is inferred.
+
+The sole requested follow-up replaces the preview's synthetic `DisplayName` of `ScreenTime preview` with **`Example App`**, avoiding repetition beneath the brand/logo. Production bodies continue to identify the affected application through `DisplayName` (for example, Apex Legends). Behavior, styling, native input/focus handling, countdown timing and enforcement separation are unchanged. Owner gameplay acceptance above applies to the explicitly tested head; the minimal follow-up receives focused automated validation and final independent review.
 
 ## Owner observations received 2026-09-24
 
@@ -12,9 +27,9 @@ The owner exercised the then-current passive WPF implementation through **two co
 - No controller or gameplay interruption.
 - Repeated notices caused no observed cumulative degradation.
 
-The owner accepts WPF-first based on these gameplay/non-interference observations. This is an owner-reported functional result, not instrumented frametime/FPS proof. The report did not supply exact tested binary hash, GPU/display configuration, raw HWND samples, precise durations, mouse pass-through measurements or a non-ranked match run. No such evidence is inferred. The new final-minute countdown was not part of those ten notices. Visual acceptance explicitly remains incomplete until the refinements and final validation are reviewed.
+The owner accepted WPF-first based on these earlier gameplay/non-interference observations. This was an owner-reported functional result, not instrumented frametime/FPS proof. That initial report did not supply exact tested binary hash, GPU/display configuration, raw HWND samples, precise durations, mouse pass-through measurements or a non-ranked match run. The new final-minute countdown was not part of those ten notices. Visual acceptance was still pending at that stage; the final result above supersedes that pending status.
 
-The fields and table below are for **the refined presentation and six-state cycle**, not a denial or relabeling of the above completed functional observation.
+The optional detail fields below remain unfilled where the owner supplied an aggregate result rather than individual measurements. They do not change the reported final PASS into a NOT RUN status.
 
 ## Environment to record
 
@@ -34,19 +49,15 @@ Run first and subsequent sequences under idle and representative training load. 
 
 | Notice | First/subsequent; idle/load; display mode | Foreground HWND before/during/after | Minimize/fullscreen unchanged | Mouse/held-key/controller continuity | Visible seconds | Baseline vs notice frametime observations | Pass/fail and notes |
 |---|---|---|---|---|---|---|---|
-| Ten-minute quota preview | NOT RUN | | | | | | |
-| Five-minute quota preview | NOT RUN | | | | | | |
-| Grace-start preview | NOT RUN | | | | | | |
-| Final-grace preview | NOT RUN | | | | | | |
-| Blocked preview | NOT RUN | | | | | | |
-| Final-minute countdown (at most 60 seconds, once per second) | NOT RUN | | | | | | |
+| Refined notices (aggregate owner report) | Active firing-range gameplay; per-kind/display-mode detail not supplied | No focus loss reported; raw HWNDs not supplied | Not separately reported in final update | No controller/gameplay interruption | Not supplied | No perceived FPS drop/hitch; owner performance rating 10/10 | PASS; colors, centering and dynamic sizing accepted |
+| Full final-minute countdown | Active firing-range gameplay | No focus loss reported; raw HWNDs not supplied | Not separately reported in final update | No controller/gameplay interruption | Full final minute reported; precise measurement not supplied | No perceived FPS drop/hitch | PASS; correct once-per-second updates |
 
 Any reproducible focus, input, fullscreen or rendering regression stops acceptance; preserve evidence and request the WPF fallback decision. Suppression/invisibility must be recorded. Do not modify production activation behavior based on a failed secure-desktop or foreground-acquisition test precondition.
 
 ## Later gates
 
 - Previous five-notice presentation, owner functional firing-range result: **PASS as observed above**
-- Refined presentation/countdown, owner visual and final firing-range sign-off: **PENDING**
-- Independent review of measured target-setup evidence: **PENDING**
+- Refined presentation/countdown, owner visual and final firing-range sign-off: **PASS on `eca318e`**
+- Final independent review of acceptance evidence and minimal preview-label follow-up: **PENDING**
 - Normal non-ranked testing, only after training passes: **NOT RUN**
 - Ranked: **later explicit gate; NOT RUN**

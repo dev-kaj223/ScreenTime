@@ -168,7 +168,7 @@ public partial class App : WpfApplication
                 kind == TimeGuard.Models.NotificationKind.GraceStarted ? 20 :
                 kind == TimeGuard.Models.NotificationKind.GraceFinalMinute ? 1 : 5;
             var grace = kind is TimeGuard.Models.NotificationKind.GraceStarted or TimeGuard.Models.NotificationKind.GraceFiveMinutes or TimeGuard.Models.NotificationKind.GraceFinalMinute;
-            _previewNotice = new("preview", "preview", "ScreenTime preview", kind, now,
+            _previewNotice = new("preview", "preview", "Example App", kind, now,
                 now.AddSeconds(kind == TimeGuard.Models.NotificationKind.GraceFinalMinute ? 60 : 15),
                 TimeSpan.FromMinutes(minutes), grace ? "preview" : null, grace ? now.AddMinutes(minutes) : null);
         };
