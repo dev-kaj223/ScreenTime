@@ -121,8 +121,20 @@ public class ReleaseSmokeTests(ITestOutputHelper output)
         }
         Assert.False(fixture.App.HasExited);
         Signal(fixture.Runtime.StatusEventName);
-        var panel = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime");
-        Assert.NotNull(panel.FindTextContaining("No enabled applications configured")); panel.Close();
+        Window? panel = null;
+        var ready = SpinWait.SpinUntil(() =>
+        {
+            if (fixture.App.HasExited) return false;
+            panel = fixture.App.GetAllTopLevelWindows(fixture.Automation).SingleOrDefault(w =>
+                w.Title == "ScreenTime" && w.Properties.ProcessId.ValueOrDefault == fixture.App.ProcessId);
+            return panel?.FindTextContaining("No enabled applications configured") is not null;
+        }, TimeSpan.FromSeconds(5));
+        var windowState = $"fixture PID={fixture.App.ProcessId}; exited={fixture.App.HasExited}; " +
+            string.Join(" | ", fixture.App.GetAllTopLevelWindows(fixture.Automation).Select(w =>
+                $"title='{w.Title}', HWND={w.Properties.NativeWindowHandle.Value}, PID={w.Properties.ProcessId.Value}, content=[{string.Join("; ", w.FindAllDescendants().Select(e => e.Name))}]"));
+        output.WriteLine("Package popup readiness: " + windowState);
+        Assert.True(ready, "The exact fixture popup must render its empty state without reactivation or reopening. " + windowState);
+        Assert.NotNull(panel!.FindTextContaining("No enabled applications configured")); panel!.Close();
         var before = System.Text.Json.JsonSerializer.Serialize(fixture.OpenDatabase().LoadConfig());
         foreach (var signal in new[] { fixture.Runtime.SettingsEventName, fixture.Runtime.ExitEventName })
         {
