@@ -70,7 +70,7 @@ The original interactive/topmost TimeGuard warning caused visible Apex disruptio
 ## Phase 8: user-facing naming and branding
 
 - Use ScreenTime for user-facing naming, titles, executable/product metadata and artifact names. Keep namespaces, project paths, profiles and storage identities stable unless a minimal output-name change is needed for `ScreenTime.exe`.
-- Replace the centralized interim mark with the owner-selected hourglass; WPF windows, notices, tray and exported executable/package icons must derive from that shared artwork. The exact hourglass appearance remains an explicit owner decision, not an implementation default.
+- Replace the centralized interim mark with the owner-selected hourglass; WPF windows, notices, tray and exported executable/package icons must derive from that shared artwork. The owner explicitly selected **option B — Filled base** on 2026-09-25 (D23), retaining the neutral `#D7DEE9` geometry shown in the comparison.
 - Preserve automation IDs, protected commands, passive notification behavior and existing layout. This is naming/branding polish, not a broad UI redesign or Phase 9 distribution/profile change. Keep upstream license attribution.
 
 ## Deferred unless explicitly promoted

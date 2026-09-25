@@ -42,7 +42,7 @@ UI tests need an unlocked interactive desktop and must run serially. Fixtures la
 
 Core owns policy, measured accounting, SQLite persistence and exact-instance enforcement. The WPF app owns presentation and protected commands. SQLite/Dapper, OxyPlot, xUnit and FlaUI remain the existing dependencies.
 
-Branding is centralized in `src/TimeGuard.App/Branding/ScreenTimeBranding.xaml`. On Windows, run `powershell -STA -File tools/Generate-BrandingIcon.ps1` after changing it; add `-Verify` to check the committed multi-size ICO without writing it. The final hourglass selection is pending owner approval; the current export retains the interim clock.
+Branding is centralized in `src/TimeGuard.App/Branding/ScreenTimeBranding.xaml`. On Windows, run `powershell -STA -File tools/Generate-BrandingIcon.ps1` after changing it; add `-Verify` to check the committed multi-size ICO without writing it. The owner-selected filled-base hourglass is shared by the app, tray, windows and notices.
 
 ## License and provenance
 

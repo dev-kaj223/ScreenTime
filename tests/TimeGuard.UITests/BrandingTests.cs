@@ -10,6 +10,11 @@ using TimeGuard.Models;
 using TimeGuard.Services;
 using TimeGuard.UITests.Helpers;
 using TimeGuard.UI;
+using FlaUI.Core.Definitions;
+using FlaUI.Core.Input;
+using FlaUI.Core.AutomationElements;
+using NotificationKind = TimeGuard.Models.NotificationKind;
+using Image = System.Windows.Controls.Image;
 using Xunit;
 
 namespace TimeGuard.UITests;
@@ -43,11 +48,12 @@ public class BrandingTests
             var panel = new StatusPanel();
             var dictionary = new ResourceDictionary { Source = new Uri("/ScreenTime;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
             var image = (DrawingImage)dictionary["ScreenTimeBrandImage"];
-            // The interim clock's closing arc extends 0.005 DIP left of zero.
-            Assert.InRange(image.Drawing.Bounds.X, -0.01, 0.01);
-            Assert.InRange(image.Drawing.Bounds.Y, -0.01, 0.01);
-            Assert.InRange(image.Drawing.Bounds.Width, 31.99, 32.01);
-            Assert.InRange(image.Drawing.Bounds.Height, 31.99, 32.01);
+            Assert.Equal(new Rect(0, 0, 32, 32), image.Drawing.Bounds);
+            var mark = (GeometryDrawing)((DrawingGroup)image.Drawing).Children[1];
+            Assert.Equal("#FFD7DEE9", ((SolidColorBrush)mark.Brush).Color.ToString());
+            Assert.True(mark.Geometry.FillContains(new Point(16, 26))); // Approved filled base.
+            Assert.True(mark.Geometry.FillContains(new Point(16, 16))); // Neck remains connected.
+            Assert.False(mark.Geometry.FillContains(new Point(16, 8))); // Open upper chamber.
             var resource = System.Windows.Application.GetResourceStream(new Uri("/ScreenTime;component/Branding/ScreenTime.ico", UriKind.Relative));
             Assert.NotNull(resource);
             using var source = resource.Stream;
@@ -84,7 +90,82 @@ public class BrandingTests
         Assert.Null(window.FindTextContaining("parent password"));
         var hwnd = window.Properties.NativeWindowHandle.Value;
         Assert.NotEqual(IntPtr.Zero, SendMessage(hwnd, 0x007F, new IntPtr(1), IntPtr.Zero)); // WM_GETICON / ICON_BIG
-        window.CaptureToFile(Path.Combine(AppContext.BaseDirectory, "phase8-first-run.png"));
+        CaptureClearWindow(window, "phase8-first-run.png");
+        CaptureShellIcon(fixture, taskbar: true);
+    }
+
+    [Fact]
+    public void FinalBranding_ActualTrayStatusProtectedAccessAndSettingsSurfaces()
+    {
+        using var fixture = new SeededAppFixture();
+        CaptureShellIcon(fixture, taskbar: false);
+        using (var signal = EventWaitHandle.OpenExisting(fixture.Runtime.StatusEventName)) signal.Set();
+        var status = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime");
+        CaptureClearWindow(status, "phase8-status.png"); status.Close();
+        fixture.RequestSettings();
+        var prompt = fixture.App.WaitForWindow(fixture.Automation, "Protected Access");
+        CaptureClearWindow(prompt, "phase8-protected-access.png");
+        prompt.FindFirstDescendant(cf => cf.ByAutomationId("PasswordBox")).Click();
+        Keyboard.Type(AppFixture.TestPassword); prompt.FindButton("Unlock").Invoke();
+        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime Settings");
+        CaptureClearWindow(settings, "phase8-settings.png");
+        settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(ControlType.TabItem))).AsTabItem().Select();
+        CaptureClearWindow(settings, "phase8-notification-settings.png");
+        settings.FindButton("Cancel").Invoke();
+        Assert.False(fixture.App.HasExited);
+    }
+
+    private static void CaptureClearWindow(FlaUI.Core.AutomationElements.Window window, string name)
+    {
+        var hwnd = window.Properties.NativeWindowHandle.Value;
+        window.SetForeground();
+        SetWindowPos(hwnd, IntPtr.Zero, 0, 0, 0, 0, 0x0013); // Normal HWND_TOP, never topmost.
+        Assert.True(SpinWait.SpinUntil(() =>
+        {
+            using var dpi = new PhysicalPixelScope();
+            Assert.Equal(0, DwmGetWindowAttribute(hwnd, 9, out var bounds, Marshal.SizeOf<NativeRect>()));
+            var r = bounds.Rectangle;
+            return new[] { (0.1, 0.1), (0.9, 0.1), (0.5, 0.5), (0.1, 0.9), (0.9, 0.9) }
+                .All(p => GetAncestor(WindowFromPoint(new NativePoint((int)(r.Left + p.Item1 * r.Width),
+                    (int)(r.Top + p.Item2 * r.Height))), 2) == hwnd);
+        }, TimeSpan.FromSeconds(3)), "Owned window must be unobscured before capturing final branding.");
+        Assert.Equal(0, DwmGetWindowAttribute(hwnd, 9, out var captureBounds, Marshal.SizeOf<NativeRect>()));
+        CapturePixels(captureBounds.Rectangle, name);
+    }
+
+    private static void CaptureShellIcon(AppFixture fixture, bool taskbar)
+    {
+        using var dpi = new PhysicalPixelScope();
+        var desktop = fixture.Automation.GetDesktop();
+        static bool Visible(AutomationElement element) => element.Properties.IsOffscreen.TryGetValue(out var offscreen) && !offscreen;
+        static string Name(AutomationElement element) => (element.Properties.Name.ValueOrDefault ?? "").Trim();
+        var appId = "Appid: " + Path.Combine(AppContext.BaseDirectory, "App", "ScreenTime.exe");
+        FlaUI.Core.AutomationElements.AutomationElement[] ShellRoots() => desktop.FindAllChildren()
+            .Where(e => e.Properties.ClassName.ValueOrDefault is "Shell_TrayWnd" or "Shell_SecondaryTrayWnd" or "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland").ToArray();
+        FlaUI.Core.AutomationElements.AutomationElement? FindIcon() => ShellRoots()
+            .SelectMany(e => e.FindAllDescendants()).FirstOrDefault(e =>
+                (taskbar ? e.Properties.AutomationId.ValueOrDefault == appId : Name(e).StartsWith("ScreenTime —", StringComparison.Ordinal)) && Visible(e));
+        var icon = FindIcon(); FlaUI.Core.AutomationElements.Button? overflowToggle = null;
+        try
+        {
+            if (icon is null && !taskbar)
+            {
+                var chevron = ShellRoots().SelectMany(e => e.FindAllDescendants()).FirstOrDefault(e =>
+                    new[] { "Show hidden icons", "Hidden icon menu", "Notification Chevron" }
+                        .Contains(Name(e), StringComparer.OrdinalIgnoreCase));
+                Assert.NotNull(chevron);
+                overflowToggle = chevron.AsButton(); overflowToggle.Invoke();
+            }
+            Assert.True(SpinWait.SpinUntil(() => (icon = FindIcon()) is not null, TimeSpan.FromSeconds(3)),
+                "The fixture's ScreenTime shell icon must be visible for the final capture.");
+            CapturePixels(icon!.BoundingRectangle, taskbar ? "phase8-taskbar.png" : "phase8-tray.png");
+        }
+        finally
+        {
+            // Close only the shell flyout this check opened; never leave a key held or send Escape to another app.
+            if (overflowToggle is not null && ShellRoots().Any(e => Visible(e) &&
+                e.ClassName is "NotifyIconOverflowWindow" or "TopLevelWindowForOverflowXamlIsland")) overflowToggle.Invoke();
+        }
     }
 
     [Fact]
@@ -118,6 +199,32 @@ public class BrandingTests
         });
     }
 
+    // UIA/native coordinates and GDI sampling must share physical pixels. FlaUI's
+    // CaptureToFile rescales some surfaces under this mixed WPF/UIA test host.
+    private sealed class PhysicalPixelScope : IDisposable
+    {
+        private readonly IntPtr previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        public PhysicalPixelScope() => Assert.NotEqual(IntPtr.Zero, previous);
+        public void Dispose() => SetThreadDpiAwarenessContext(previous);
+    }
+
+    private static void CapturePixels(System.Drawing.Rectangle bounds, string name)
+    {
+        using var dpi = new PhysicalPixelScope();
+        Assert.True(bounds.Width > 0 && bounds.Height > 0);
+        using var bitmap = new System.Drawing.Bitmap(bounds.Width, bounds.Height);
+        using (var graphics = System.Drawing.Graphics.FromImage(bitmap))
+            graphics.CopyFromScreen(bounds.Location, System.Drawing.Point.Empty, bounds.Size);
+        bitmap.Save(Path.Combine(AppContext.BaseDirectory, name), System.Drawing.Imaging.ImageFormat.Png);
+    }
+
+    [StructLayout(LayoutKind.Sequential)]
+    private readonly record struct NativeRect(int Left, int Top, int Right, int Bottom)
+    {
+        public System.Drawing.Rectangle Rectangle => System.Drawing.Rectangle.FromLTRB(Left, Top, Right, Bottom);
+    }
+    [DllImport("dwmapi.dll")] private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out NativeRect bounds, int size);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
     private static int[] FrameSizes(byte[] ico)
     {
         using var reader = new BinaryReader(new MemoryStream(ico));
@@ -184,4 +291,8 @@ public class BrandingTests
     private static extern uint ExtractIconEx(string file, int index, IntPtr[] large, IntPtr[] small, uint count);
     [DllImport("user32.dll")] private static extern bool DestroyIcon(IntPtr icon);
     [DllImport("user32.dll")] private static extern IntPtr SendMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam);
+    [StructLayout(LayoutKind.Sequential)] private readonly record struct NativePoint(int X, int Y);
+    [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(NativePoint point);
+    [DllImport("user32.dll")] private static extern IntPtr GetAncestor(IntPtr hwnd, uint flags);
+    [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int width, int height, uint flags);
 }

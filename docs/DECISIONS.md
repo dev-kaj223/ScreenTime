@@ -48,6 +48,10 @@ Owner-approved Phase 6 refinement: the status model represents a collection of c
 
 Routine presentation choice under D21: Standard retains all notices and defaults; Minimal retains grace start, final countdown and blocked/expired notices; Custom independently controls the six existing milestones. Countdown selection is 1–60 seconds and can be disabled. Presets only affect presentation and are easy to revise without policy/data migration.
 
+### D23 — Filled-base hourglass (2026-09-25)
+
+The owner explicitly selected **option B — Filled base** from the two original vector candidates shown at 16/32 pixels and larger header size, with dark tray/notice mockups: "I select option B - Fill base". This closes the H8 visual-choice gate. The selected neutral `#D7DEE9` mark is the exact B geometry in the comparison, retained centrally in `Branding/ScreenTimeBranding.xaml` with its 32-DIP canvas. The same resource feeds WPF windows/notices, tray icons and the generated multi-size executable ICO. No other visual redesign, notification behavior, policy, profile or startup change is authorized by this choice. Final asset validation and independent review remain required; selection alone is not merge clearance.
+
 ### Historical setup decisions
 
 - Replace routine human handoffs with implement → test → push phase branch → PR into `screentime-dev` → independent Codex review → remediation/re-review → final validation → merge. GitHub is the shared review record; an implementer's report is never review proof.
