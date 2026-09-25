@@ -202,8 +202,26 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         }
         db.SaveRule(new() { ProcessName = "screentime.testprocess", DisplayName = "Owned enforcement helper", DailyLimitMinutes = 1,
             BlockedPeriods = [new() { StartDayOfWeek = DateTime.Today.DayOfWeek, StartMinute = 0, EndMinute = 0, EndDayOffset = 1 }] });
-        settings.Close(); dashboard.Close();
-        Assert.True(SpinWait.SpinUntil(() => _fx.App.GetAllTopLevelWindows(_fx.Automation).Length == 0, TimeSpan.FromSeconds(3)));
+        string WindowIdentities() => $"fixture PID={_fx.App.ProcessId}; exited={_fx.App.HasExited}; " +
+            string.Join(" | ", _fx.App.GetAllTopLevelWindows(_fx.Automation).Select(w =>
+                $"title='{w.Title}', HWND={w.Properties.NativeWindowHandle.Value}, enabled={w.IsEnabled}, PID={w.Properties.ProcessId.Value}"));
+        var settingsHandle = settings.Properties.NativeWindowHandle.Value;
+        var dashboardHandle = dashboard.Properties.NativeWindowHandle.Value;
+        settings.Close();
+        var settingsGoneAndDashboardReady = SpinWait.SpinUntil(() =>
+        {
+            var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
+            return windows.All(w => w.Properties.NativeWindowHandle.Value != settingsHandle) &&
+                windows.SingleOrDefault(w => w.Properties.NativeWindowHandle.Value == dashboardHandle)?.IsEnabled == true;
+        }, TimeSpan.FromSeconds(3));
+        var afterSettings = WindowIdentities();
+        output.WriteLine("After Settings close: " + afterSettings);
+        Assert.True(settingsGoneAndDashboardReady, "Settings must be gone and its existing Dashboard enabled before closing Dashboard. " + afterSettings);
+        dashboard.Close();
+        var allGone = SpinWait.SpinUntil(() => _fx.App.GetAllTopLevelWindows(_fx.Automation).Length == 0, TimeSpan.FromSeconds(3));
+        var afterDashboard = WindowIdentities();
+        output.WriteLine("After Dashboard close: " + afterDashboard);
+        Assert.True(allGone, "All fixture windows must close. " + afterDashboard);
         using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.StatusEventName)) signal.Set();
         Window? status = null;
         var observed = SpinWait.SpinUntil(() =>
