@@ -1,12 +1,7 @@
-<Window x:Class="TimeGuard.UI.DashboardWindow"
+<UserControl x:Class="TimeGuard.UI.DashboardWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:oxy="http://oxyplot.org/wpf"
-        Title="ScreenTime — Usage Dashboard"
-        Width="820" Height="800"
-        MinWidth="600" MinHeight="420"
-        Icon="{DynamicResource ScreenTimeBrandImage}"
-        WindowStartupLocation="CenterOwner"
         Background="{StaticResource DarkBrush}">
     <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="24">
         <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
@@ -34,7 +29,14 @@
                 </DataTemplate></ItemsControl.ItemTemplate>
             </ItemsControl>
         </ScrollViewer>
-        <TextBlock Text="Last 7 Days" Foreground="{StaticResource TextBrush}" FontSize="19" FontWeight="SemiBold" Margin="0,0,0,10"/>        <!-- 7-day bar chart -->
+        <Grid Margin="0,0,0,10"><Grid.ColumnDefinitions><ColumnDefinition Width="*"/><ColumnDefinition Width="Auto"/></Grid.ColumnDefinitions>
+            <TextBlock x:Name="HistoryHeader" Text="Last 7 Days" Foreground="{StaticResource TextBrush}" FontSize="19" FontWeight="SemiBold"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button Content="Week" Tag="Week" Style="{StaticResource SecondaryButton}" Click="OnHistoryRange" Margin="0,0,4,0"/>
+                <Button Content="Month" Tag="Month" Style="{StaticResource SecondaryButton}" Click="OnHistoryRange" Margin="0,0,4,0"/>
+                <Button Content="Year" Tag="Year" Style="{StaticResource SecondaryButton}" Click="OnHistoryRange"/>
+            </StackPanel>
+        </Grid>
         <Border Grid.Row="1"
                 Background="{StaticResource SurfaceBrush}"
                 CornerRadius="8" Padding="8" Margin="0,0,0,16">
@@ -42,7 +44,7 @@
                 <oxy:PlotView x:Name="BarChart" Background="Transparent" Height="230"/>
                 <StackPanel x:Name="EmptyHistory" VerticalAlignment="Center" HorizontalAlignment="Center" Margin="20">
                     <TextBlock Text="No usage recorded yet." Foreground="{StaticResource TextBrush}" FontSize="18" TextAlignment="Center"/>
-                    <TextBlock Text="ScreenTime will show your last seven days here as usage accumulates." Foreground="{StaticResource SubtextBrush}" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
+                    <TextBlock x:Name="EmptyHistoryDetail" Text="ScreenTime will show your last seven days here as usage accumulates." Foreground="{StaticResource SubtextBrush}" Margin="0,8,0,0" TextWrapping="Wrap" TextAlignment="Center"/>
                 </StackPanel>
             </Grid>
         </Border>
@@ -71,4 +73,4 @@
             </DataGrid.Columns>
         </DataGrid>
     </StackPanel></ScrollViewer>
-</Window>
+</UserControl>

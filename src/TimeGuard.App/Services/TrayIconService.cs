@@ -19,6 +19,9 @@ internal sealed class TrayIconService : IDisposable
     private readonly Func<Task> _exit;
     private System.Drawing.Point _dismissedAtCursor;
     private long _rightDismissedAt;
+    private Forms.MouseButtons _pressedButton;
+    private long _lastRightUp;
+    private System.Drawing.Point _lastRightCursor;
     private bool _disposed;
     internal StatusPanel? Panel => _panel;
     internal bool IsDisposed => _disposed;
@@ -30,9 +33,33 @@ internal sealed class TrayIconService : IDisposable
         _image = Branding.ScreenTimeBranding.CreateTrayIcon(branding ?? Branding.ScreenTimeBranding.Image);
         // NotifyIcon owns the hidden native window and handles TaskbarCreated (Explorer recreation).
         _icon = new Forms.NotifyIcon { Icon = _image, Text = "ScreenTime — Starting", Visible = true };
-        _icon.MouseClick += (_, e) => HandleClick(e.Button);
+        // A NotifyIcon MouseClick may be synthesized around shell focus changes.
+        // Dispatch only a complete same-button down/up gesture; in particular a
+        // right-click popup activation cannot turn a stray left MouseClick into
+        // a main-window request.
+        _icon.MouseDown += (_, e) => HandleMouseDown(e.Button);
+        _icon.MouseUp += (_, e) => HandleMouseUp(e.Button);
         _timer.Tick += (_, _) => Refresh();
         _timer.Start();
+    }
+
+    internal void HandleMouseDown(Forms.MouseButtons button)
+    {
+        if (_disposed) return;
+        _pressedButton = button is Forms.MouseButtons.Left or Forms.MouseButtons.Right ? button : Forms.MouseButtons.None;
+    }
+
+    internal void HandleMouseUp(Forms.MouseButtons button)
+    {
+        if (_disposed || _pressedButton != button) return;
+        _pressedButton = Forms.MouseButtons.None;
+        var cursor = Forms.Cursor.Position;
+        if (button == Forms.MouseButtons.Left && _lastRightUp != 0 &&
+            Environment.TickCount64 - _lastRightUp < 300 &&
+            Math.Abs(cursor.X - _lastRightCursor.X) <= 4 && Math.Abs(cursor.Y - _lastRightCursor.Y) <= 4)
+            return;
+        if (button == Forms.MouseButtons.Right) { _lastRightUp = Environment.TickCount64; _lastRightCursor = cursor; }
+        HandleClick(button);
     }
 
     internal void HandleClick(Forms.MouseButtons button)

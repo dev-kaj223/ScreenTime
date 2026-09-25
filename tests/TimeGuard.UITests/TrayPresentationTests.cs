@@ -80,6 +80,34 @@ public class TrayPresentationTests
     }
 
     [Fact]
+    public void RightTrayGesture_RequestsPopupAndNeverRequestsMainWindow()
+    {
+        Sta(() =>
+        {
+            _ = new StatusPanel();
+            var branding = new ResourceDictionary { Source = new Uri("/ScreenTime;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
+            var dashboards = 0;
+            using var tray = new TrayIconService(() => new(Now, []), () => { }, () => Task.CompletedTask,
+                (ImageSource)branding["ScreenTimeBrandImage"], dashboard: () => dashboards++);
+            tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Right);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Right);
+            Assert.NotNull(tray.Panel);
+            Assert.Equal(0, dashboards);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left); // shell-generated unmatched event
+            Assert.Equal(0, dashboards);
+            tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Right);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Right);
+            Assert.Null(tray.Panel);
+            Assert.Equal(0, dashboards);
+            Thread.Sleep(320);
+            tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Left);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left); // duplicate up is ignored
+            Assert.Equal(1, dashboards);
+        });
+    }
+
+    [Fact]
     public void BoundedReadOnlyLayout_SharedBranding_TraySingleton_CloseAndDispose()
     {
         Sta(() =>

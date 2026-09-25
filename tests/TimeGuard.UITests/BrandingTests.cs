@@ -115,7 +115,7 @@ public class BrandingTests
         CaptureClearWindow(prompt, "phase8-protected-access.png");
         prompt.FindFirstDescendant(cf => cf.ByAutomationId("PasswordBox")).Click();
         Keyboard.Type(AppFixture.TestPassword); prompt.FindButton("Unlock").Invoke();
-        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime Settings");
+        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime — Main");
         CaptureClearWindow(settings, "phase8-settings.png");
         settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(ControlType.TabItem))).AsTabItem().Select();
         CaptureClearWindow(settings, "phase8-notification-settings.png");

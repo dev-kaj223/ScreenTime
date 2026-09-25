@@ -17,7 +17,7 @@ public class RuleEditWindowTests : IDisposable
         var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
         prompt.FindAllDescendants(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit))[0].AsTextBox().Text = AppFixture.TestPassword;
         prompt.FindButton("Unlock").Invoke();
-        return _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
+        return _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
     }
     private Window OpenRuleEditWindow(Window settings)
     {

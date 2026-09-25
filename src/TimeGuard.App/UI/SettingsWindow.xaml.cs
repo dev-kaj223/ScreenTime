@@ -15,24 +15,87 @@ public partial class SettingsWindow : Window
     private readonly DatabaseService _db;
     private readonly RuntimeOptions _runtime;
     private readonly NotificationPreferenceStore _preferences;
-    private readonly Action? _openDashboard;
+    private readonly Action? _requestSettings;
+    private readonly Action? _settingsChanged;
+    private readonly DashboardWindow _today;
+    private NotificationPreferences _savedPreferences;
+    internal bool IsSettingsUnlocked { get; private set; }
+    private bool _loadingStartup = true;
     private ObservableCollection<AppRule> _rules = [];
 
     private record UsageRow(string ProcessName, string UsageMinutesDisplay, bool Blocked);
 
-    internal SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null, Action? openDashboard = null)
+    internal SettingsWindow(DatabaseService db, RuntimeOptions? runtime = null,
+        Action? requestSettings = null, Action? settingsChanged = null, Func<StatusSnapshot?>? readStatus = null)
     {
         InitializeComponent();
         _db = db;
-        _openDashboard = openDashboard;
+        _requestSettings = requestSettings;
+        _settingsChanged = settingsChanged;
         _runtime = runtime ?? RuntimeOptions.Development();
         _preferences = new NotificationPreferenceStore(_runtime.Paths);
         LoadRules();
         LoadUsage();
 
-        NotificationEditor.Load(_preferences.Load());
-        StartupCheckBox.IsEnabled = _runtime.AllowsStartup;
-        StartupCheckBox.IsChecked = StartupHelper.IsRegistered(_runtime);
+        _savedPreferences = _preferences.Load();
+        NotificationEditor.Load(_savedPreferences);
+        _loadingStartup = true;
+        try
+        {
+            StartupCheckBox.IsEnabled = _runtime.AllowsStartup;
+            StartupCheckBox.IsChecked = StartupHelper.IsRegistered(_runtime);
+        }
+        finally { _loadingStartup = false; }
+        _today = new DashboardWindow(db, readStatus);
+        TodayHost.Content = _today;
+        Closing += OnMainClosing;
+        SourceInitialized += (_, _) => MainWindowPlacement.Center(this, System.Windows.Forms.Cursor.Position);
+    }
+
+    internal void EnterSettings()
+    {
+        IsSettingsUnlocked = true;
+        TodayHost.Visibility = Visibility.Collapsed;
+        SettingsContent.Visibility = Visibility.Visible;
+        SettingsButton.Content = "Settings 🔓";
+    }
+
+    internal void EnterToday()
+    {
+        if (SettingsContent.Visibility == Visibility.Visible && !TryLeaveSettings()) return;
+        SettingsContent.Visibility = Visibility.Collapsed;
+        TodayHost.Visibility = Visibility.Visible;
+    }
+
+    private void OnViewSettings(object sender, RoutedEventArgs e)
+    {
+        if (IsSettingsUnlocked) EnterSettings();
+        else _requestSettings?.Invoke();
+    }
+
+    private bool HasUnsavedChanges()
+    {
+        if (NewPasswordBox.Password.Length > 0 || ConfirmPasswordBox.Password.Length > 0) return true;
+        try { return NotificationEditor.Read() != _savedPreferences; }
+        catch (ArgumentException) { return true; }
+    }
+
+    private bool TryLeaveSettings()
+    {
+        if (!HasUnsavedChanges()) return true;
+        var answer = WpfMessageBox.Show(this, "Save changes to Settings before leaving?", "Unsaved Settings",
+            MessageBoxButton.YesNoCancel, MessageBoxImage.Question);
+        if (answer == MessageBoxResult.Cancel) return false;
+        if (answer == MessageBoxResult.Yes) return TrySavePreferences();
+        NotificationEditor.Load(_savedPreferences);
+        NewPasswordBox.Clear(); ConfirmPasswordBox.Clear();
+        return true;
+    }
+
+    private void OnMainClosing(object? sender, System.ComponentModel.CancelEventArgs e)
+    {
+        if (SettingsContent.Visibility == Visibility.Visible && !TryLeaveSettings()) e.Cancel = true;
+        if (!e.Cancel) IsSettingsUnlocked = false;
     }
 
     // ── Rules Tab ─────────────────────────────────────────────────────────────
@@ -142,6 +205,7 @@ public partial class SettingsWindow : Window
         {
             _db.DeleteRule(selected.Id);
             LoadRules();
+            _settingsChanged?.Invoke();
         }
     }
 
@@ -179,13 +243,12 @@ public partial class SettingsWindow : Window
 
     private void OnViewDashboard(object sender, RoutedEventArgs e)
     {
-        Close();
-        if (_openDashboard is not null) Dispatcher.BeginInvoke(_openDashboard);
+        EnterToday();
     }
 
     private void SaveRuleWithFeedback(AppRule rule)
     {
-        try { _db.SaveRule(rule); }
+        try { _db.SaveRule(rule); _settingsChanged?.Invoke(); }
         catch (Microsoft.Data.Sqlite.SqliteException ex) when (ex.SqliteExtendedErrorCode == 2067)
         {
             WpfMessageBox.Show(this, "An application with this process name already has a rule. Edit the existing rule.",
@@ -242,6 +305,7 @@ public partial class SettingsWindow : Window
 
     private void OnStartupToggle(object sender, RoutedEventArgs e)
     {
+        if (_loadingStartup) return;
         if (StartupCheckBox.IsChecked == true) StartupHelper.Register(_runtime);
         else StartupHelper.Unregister(_runtime);
     }
@@ -250,15 +314,30 @@ public partial class SettingsWindow : Window
 
     private void OnSave(object sender, RoutedEventArgs e)
     {
-        try { _preferences.Save(NotificationEditor.Read()); }
+        if (TrySavePreferences()) EnterToday();
+    }
+
+    private bool TrySavePreferences()
+    {
+        if (NewPasswordBox.Password.Length > 0 || ConfirmPasswordBox.Password.Length > 0)
+        {
+            WpfMessageBox.Show(this, "Use Change Password to apply the password fields.", "Security", MessageBoxButton.OK);
+            return false;
+        }
+        try { var preferences = NotificationEditor.Read(); _preferences.Save(preferences); _savedPreferences = preferences; }
         catch (Exception ex) when (ex is ArgumentException or System.IO.IOException or UnauthorizedAccessException)
         {
             WpfMessageBox.Show(this, ex.Message, "Notification preferences", MessageBoxButton.OK);
-            return;
+            return false;
         }
-        DialogResult = true;
-        Close();
+        _settingsChanged?.Invoke();
+        return true;
     }
 
-    private void OnCancel(object sender, RoutedEventArgs e) => Close();
+    private void OnCancel(object sender, RoutedEventArgs e)
+    {
+        NotificationEditor.Load(_savedPreferences);
+        NewPasswordBox.Clear(); ConfirmPasswordBox.Clear();
+        EnterToday();
+    }
 }

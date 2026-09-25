@@ -11,7 +11,7 @@ using System.Windows.Threading;
 
 namespace TimeGuard.UI;
 
-public partial class DashboardWindow : Window
+public partial class DashboardWindow : System.Windows.Controls.UserControl
 {
     private readonly DatabaseService _db;
     private readonly Func<StatusSnapshot?> _read;
@@ -19,7 +19,8 @@ public partial class DashboardWindow : Window
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromSeconds(1) };
     private DateTimeOffset _lastHistoryRefresh;
     private HashSet<string> _configured = [];
-    private IReadOnlyList<(DateOnly Date, string ProcessName, double UsageMins, bool IsPassive)> _chartData = [];
+    private IReadOnlyList<(DateOnly Bucket, string ProcessName, double UsageMins)> _chartData = [];
+    private HistoryRange _range = HistoryRange.Week;
 
     private record DrillRow(string ProcessName, string WindowTitle, string Start, string End, string Duration);
 
@@ -32,8 +33,12 @@ public partial class DashboardWindow : Window
         _status.Refresh(_read(), DateTimeOffset.UtcNow);
         BuildChart();
         _timer.Tick += OnRefresh;
-        _timer.Start();
-        Closed += (_, _) => { _timer.Stop(); _timer.Tick -= OnRefresh; };
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible) { _timer.Start(); BuildChart(); }
+            else _timer.Stop();
+        };
+        Unloaded += (_, _) => _timer.Stop();
     }
 
     private void OnRefresh(object? sender, EventArgs e)
@@ -43,16 +48,35 @@ public partial class DashboardWindow : Window
         if (now - _lastHistoryRefresh >= TimeSpan.FromSeconds(30)) BuildChart();
     }
 
+    private void OnHistoryRange(object sender, RoutedEventArgs e)
+    {
+        if (sender is not System.Windows.Controls.Button { Tag: string value } ||
+            !Enum.TryParse<HistoryRange>(value, out var range)) return;
+        _range = range;
+        BuildChart();
+    }
+
     private void BuildChart()
     {
         _lastHistoryRefresh = DateTimeOffset.UtcNow;
+        var plan = HistoryRangePlan.For(_range, DateOnly.FromDateTime(DateTime.Today));
         _configured = _db.GetRules().Where(r => r.Enabled).Select(r => ProcessInstance.NormalizeKey(r.ProcessName)).ToHashSet();
-        _chartData = _db.LoadChartData(7).Where(r => _configured.Contains(ProcessInstance.NormalizeKey(r.ProcessName)) &&
-            r.Date <= DateOnly.FromDateTime(DateTime.Today)).ToArray();
+        _chartData = _db.LoadUsageHistory(plan.Start, plan.End, plan.Monthly)
+            .Where(r => _configured.Contains(ProcessInstance.NormalizeKey(r.ProcessName))).ToArray();
+        HistoryHeader.Text = _range switch { HistoryRange.Week => "Last 7 Days", HistoryRange.Month => "Last 30 Days", _ => "Last 12 Months" };
+        EmptyHistoryDetail.Text = _range switch
+        {
+            HistoryRange.Week => "ScreenTime will show your last seven days here as usage accumulates.",
+            HistoryRange.Month => "ScreenTime will show your last thirty days here as usage accumulates.",
+            _ => "ScreenTime will show your last twelve months here as usage accumulates."
+        };
+        BarChart.Height = _range == HistoryRange.Month ? 610 : _range == HistoryRange.Year ? 330 : 230;
         EmptyHistory.Visibility = _chartData.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         BarChart.Visibility = _chartData.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        DrilldownHeader.Visibility = _chartData.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
-        DrilldownGrid.Visibility = _chartData.Count == 0 ? Visibility.Collapsed : Visibility.Visible;
+        DrilldownHeader.Visibility = _chartData.Count == 0 || plan.Monthly ? Visibility.Collapsed : Visibility.Visible;
+        DrilldownGrid.Visibility = _chartData.Count == 0 || plan.Monthly ? Visibility.Collapsed : Visibility.Visible;
+        DrilldownHeader.Text = "Click a bar to see that day's breakdown";
+        DrilldownGrid.ItemsSource = null;
 
         var model = new PlotModel
         {
@@ -69,11 +93,11 @@ public partial class DashboardWindow : Window
         });
 
         // Y axis — dates as categories (BarSeries in OxyPlot 2.x requires CategoryAxis on Left)
-        var dates = Enumerable.Range(0, 7).Select(i => DateOnly.FromDateTime(DateTime.Today).AddDays(i - 6)).ToList();
+        var dates = plan.Buckets;
         var yAxis = new CategoryAxis
         {
             Position           = AxisPosition.Left,
-            ItemsSource        = dates.Select(d => d.ToString("MMM d")).ToList(),
+            ItemsSource        = dates.Select(d => d.ToString(plan.Monthly ? "MMM yy" : "MMM d")).ToList(),
             TextColor          = OxyColor.FromRgb(160, 160, 184),
             TicklineColor      = OxyColors.Transparent,
             MajorGridlineStyle = LineStyle.None,
@@ -122,7 +146,7 @@ public partial class DashboardWindow : Window
             foreach (var date in dates)
             {
                 var val = _chartData
-                    .FirstOrDefault(r => r.Date == date && r.ProcessName == app)
+                    .FirstOrDefault(r => r.Bucket == date && r.ProcessName == app)
                     .UsageMins;
                 series.Items.Add(new BarItem(val));
             }
@@ -133,7 +157,7 @@ public partial class DashboardWindow : Window
         // Click to drilldown — map click Y position to date index via category axis
         model.MouseDown += (s, e) =>
         {
-            if (e.ChangedButton != OxyMouseButton.Left) return;
+            if (plan.Monthly || e.ChangedButton != OxyMouseButton.Left) return;
             var catAxis = model.Axes.OfType<CategoryAxis>().FirstOrDefault();
             if (catAxis == null) return;
             var catIdx = (int)Math.Round(catAxis.InverseTransform(e.Position.Y));

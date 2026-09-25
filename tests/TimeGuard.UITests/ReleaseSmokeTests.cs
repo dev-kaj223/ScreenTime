@@ -69,7 +69,7 @@ public class ReleaseSmokeTests(ITestOutputHelper output)
         }, TimeSpan.FromSeconds(5)));
         Assert.False(fixture.OpenDatabase().LoadConfig().IsFirstRun);
         BrandingTests.CaptureShellIcon(fixture, taskbar: false, prefix: "phase9");
-        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime Settings");
+        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime — Main");
         Assert.DoesNotContain(fixture.App.GetAllTopLevelWindows(fixture.Automation), w => w.Title == "Protected Access");
         settings.FindButton("➕ Add Rule").Invoke();
         var editor = fixture.App.WaitForWindow(fixture.Automation, "Edit App Rule");
@@ -86,10 +86,10 @@ public class ReleaseSmokeTests(ITestOutputHelper output)
         Assert.Equal(540, period.StartMinute); Assert.Equal(1020, period.EndMinute);
         settings.FindButton("Save").Invoke();
         Signal(fixture.Runtime.DashboardEventName);
-        var dashboard = fixture.App.WaitForWindow(fixture.Automation, "Usage Dashboard");
+        var dashboard = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime — Main");
         var dashboardHandle = dashboard.Properties.NativeWindowHandle.Value;
         Signal(fixture.Runtime.DashboardEventName); Thread.Sleep(200);
-        Assert.Equal(dashboardHandle, Assert.Single(fixture.App.GetAllTopLevelWindows(fixture.Automation).Where(w => w.Title.Contains("Usage Dashboard"))).Properties.NativeWindowHandle.Value);
+        Assert.Equal(dashboardHandle, Assert.Single(fixture.App.GetAllTopLevelWindows(fixture.Automation).Where(w => w.Title.Contains("ScreenTime — Main"))).Properties.NativeWindowHandle.Value);
         Signal(fixture.Runtime.StatusEventName);
         FlaUI.Core.AutomationElements.Window? popup = null;
         Assert.True(SpinWait.SpinUntil(() => (popup = fixture.App.GetAllTopLevelWindows(fixture.Automation).SingleOrDefault(w => w.Title == "ScreenTime")) is not null, TimeSpan.FromSeconds(3)));
@@ -145,7 +145,7 @@ public class ReleaseSmokeTests(ITestOutputHelper output)
             Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(fixture.OpenDatabase().LoadConfig()));
         }
         fixture.RequestSettings(); Password(fixture.App.WaitForWindow(fixture.Automation, "Protected Access"), AppFixture.TestPassword);
-        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime Settings");
+        var settings = fixture.App.WaitForWindow(fixture.Automation, "ScreenTime — Main");
         settings.FindButton("Cancel").Invoke();
         Signal(fixture.Runtime.ExitEventName); Password(fixture.App.WaitForWindow(fixture.Automation, "Protected Access"), AppFixture.TestPassword);
         Assert.True(SpinWait.SpinUntil(() => fixture.App.HasExited, TimeSpan.FromSeconds(5)));
