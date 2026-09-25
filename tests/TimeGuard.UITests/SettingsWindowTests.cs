@@ -1,4 +1,7 @@
 using FlaUI.Core.Input;
+using FlaUI.Core.AutomationElements;
+using System.Diagnostics;
+using TimeGuard.Models;
 using TimeGuard.UITests.Helpers;
 using Xunit;
 
@@ -144,5 +147,75 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         Assert.NotNull(settings.FindTextContaining("No recent applications"));
         settings.FindButton("Save").Invoke();
         Assert.Equal("123", _fx.OpenDatabase().GetSetting("OverallDailyLimitMinutes"));
+    }
+
+    [Theory]
+    [InlineData("picker")]
+    [InlineData("editor")]
+    [InlineData("confirmation")]
+    public void Dashboard_CancelsNestedProtectedFlow_ThenAllowsFreshPickerAndEnforcement(string nested)
+    {
+        var db = _fx.OpenDatabase();
+        db.SaveRule(new() { ProcessName = "nested-navigation", DisplayName = "Nested navigation", DailyLimitMinutes = 60 });
+        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
+        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
+        var settings = OpenSettingsWindow();
+        var before = System.Text.Json.JsonSerializer.Serialize(db.LoadConfig().Rules);
+        string title;
+        if (nested == "picker") { settings.FindButton("🔍 Pick Process").Invoke(); title = "Pick a Running Process"; }
+        else if (nested == "editor") { settings.FindButton("➕ Add Rule").Invoke(); title = "Edit App Rule"; }
+        else
+        {
+            settings.FindFirstDescendant(cf => cf.ByAutomationId("RulesGrid"))
+                .FindAllDescendants(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.DataItem))
+                .Single(row => row.FindTextContaining("Nested navigation") is not null).Patterns.SelectionItem.Pattern.Select();
+            settings.FindButton("🗑️ Delete").Invoke(); title = "Confirm";
+        }
+        _fx.App.WaitForWindow(_fx.Automation, title);
+        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
+        Assert.True(SpinWait.SpinUntil(() => dashboard.IsEnabled &&
+            _fx.App.GetAllTopLevelWindows(_fx.Automation).All(w => w.Title.Contains("Usage Dashboard")), TimeSpan.FromSeconds(5)),
+            "Dashboard navigation must unwind all protected modal windows.");
+        Assert.False(_fx.App.HasExited);
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(db.LoadConfig().Rules));
+
+        // A fresh picker must still select an owned helper and cancel normally after navigation.
+        var helper = _fx.LaunchHelper(headless: true);
+        settings = OpenSettingsWindow();
+        settings.FindButton("🔍 Pick Process").Invoke();
+        var picker = _fx.App.WaitForWindow(_fx.Automation, "Pick a Running Process");
+        picker.FindTextBox("SearchBox").AsTextBox().Text = "screentime.testprocess";
+        var list = picker.FindFirstDescendant(cf => cf.ByAutomationId("ProcessList")).AsListBox();
+        Assert.True(SpinWait.SpinUntil(() => list.Items.Length == 1, TimeSpan.FromSeconds(3)));
+        list.Items[0].Select(); picker.FindButton("Select").Invoke();
+        _fx.App.WaitForWindow(_fx.Automation, "Edit App Rule").FindButton("Cancel").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)));
+        settings.FindButton("🔍 Pick Process").Invoke();
+        _fx.App.WaitForWindow(_fx.Automation, "Pick a Running Process").FindButton("Cancel").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)));
+        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(db.LoadConfig().Rules));
+        // Stop this exact owned helper before adding current downtime, then verify a new instance is denied.
+        using (var owned = Process.GetProcessById(helper.Id))
+        {
+            _ = owned.Handle;
+            Assert.True(helper.Matches(owned)); owned.Kill(); Assert.True(owned.WaitForExit(3000));
+        }
+        db.SaveRule(new() { ProcessName = "screentime.testprocess", DisplayName = "Owned enforcement helper", DailyLimitMinutes = 1,
+            BlockedPeriods = [new() { StartDayOfWeek = DateTime.Today.DayOfWeek, StartMinute = 0, EndMinute = 0, EndDayOffset = 1 }] });
+        settings.Close(); dashboard.Close();
+        Assert.True(SpinWait.SpinUntil(() => _fx.App.GetAllTopLevelWindows(_fx.Automation).Length == 0, TimeSpan.FromSeconds(3)));
+        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.StatusEventName)) signal.Set();
+        Window? status = null;
+        var observed = SpinWait.SpinUntil(() =>
+        {
+            status = _fx.App.GetAllTopLevelWindows(_fx.Automation).SingleOrDefault(w => w.Title == "ScreenTime");
+            return status?.FindTextContaining("Owned enforcement helper") is not null && status.FindTextContaining("DOWNTIME") is not null;
+        }, TimeSpan.FromSeconds(5));
+        output.WriteLine("Enforcement status: " + string.Join(" | ", status?.FindAllDescendants().Select(e => e.Name) ?? []));
+        Assert.True(observed);
+        status!.Close();
+        var denied = _fx.LaunchHelper(headless: true);
+        using var process = Process.GetProcessById(denied.Id);
+        Assert.True(process.WaitForExit(8000)); Assert.False(_fx.App.HasExited);
     }
 }

@@ -254,6 +254,17 @@ public partial class App : WpfApplication
             w is UI.SettingsWindow or UI.PasswordPromptWindow);
         if (protectedWindow is not null)
         {
+            // End nested WPF modal frames explicitly, innermost first. Closing only
+            // their owner can remove their HWNDs while leaving ShowDialog on the stack.
+            var child = protectedWindow;
+            while (child.OwnedWindows.OfType<Window>().LastOrDefault(w => w.IsVisible) is { } owned)
+                child = owned;
+            if (child != protectedWindow)
+            {
+                child.Close();
+                Dispatcher.BeginInvoke(new Action(OpenDashboard));
+                return;
+            }
             protectedWindow.Close();
             Dispatcher.BeginInvoke(new Action(OpenDashboard));
             return;

@@ -105,7 +105,7 @@ public partial class SettingsWindow : Window
             Enabled     = true
         };
         var dialog = new RuleEditWindow(rule) { Owner = this };
-        if (dialog.ShowDialog() == true && dialog.Result is not null)
+        if (dialog.ShowDialog() == true && IsVisible && dialog.Result is not null)
         {
             SaveRuleWithFeedback(dialog.Result);
             LoadRules();
@@ -115,7 +115,7 @@ public partial class SettingsWindow : Window
     private void OnAddRule(object sender, RoutedEventArgs e)
     {
         var dialog = new RuleEditWindow(new AppRule()) { Owner = this };
-        if (dialog.ShowDialog() == true && dialog.Result is not null)
+        if (dialog.ShowDialog() == true && IsVisible && dialog.Result is not null)
         {
             SaveRuleWithFeedback(dialog.Result);
             LoadRules();
@@ -126,7 +126,7 @@ public partial class SettingsWindow : Window
     {
         if (RulesGrid.SelectedItem is not AppRule selected) return;
         var dialog = new RuleEditWindow(selected) { Owner = this };
-        if (dialog.ShowDialog() == true && dialog.Result is not null)
+        if (dialog.ShowDialog() == true && IsVisible && dialog.Result is not null)
         {
             dialog.Result.Id = selected.Id;
             SaveRuleWithFeedback(dialog.Result);
@@ -137,8 +137,8 @@ public partial class SettingsWindow : Window
     private void OnDeleteRule(object sender, RoutedEventArgs e)
     {
         if (RulesGrid.SelectedItem is not AppRule selected) return;
-        if (WpfMessageBox.Show($"Remove rule for \'{selected.DisplayName}\'?", "Confirm",
-                MessageBoxButton.YesNo) == MessageBoxResult.Yes)
+        if (WpfMessageBox.Show(this, $"Remove rule for \'{selected.DisplayName}\'?", "Confirm",
+                MessageBoxButton.YesNo) == MessageBoxResult.Yes && IsVisible)
         {
             _db.DeleteRule(selected.Id);
             LoadRules();
@@ -159,8 +159,8 @@ public partial class SettingsWindow : Window
         }
         var running = names.OrderBy(name => name).ToList();
 
-        var picker = new ProcessPickerWindow(running);
-        if (picker.ShowDialog() == true && picker.SelectedProcess is not null)
+        var picker = new ProcessPickerWindow(running) { Owner = this };
+        if (picker.ShowDialog() == true && IsVisible && picker.SelectedProcess is not null)
         {
             var rule = new AppRule
             {
@@ -169,7 +169,7 @@ public partial class SettingsWindow : Window
                 Enabled = true
             };
             var dialog = new RuleEditWindow(rule) { Owner = this };
-            if (dialog.ShowDialog() == true && dialog.Result is not null)
+            if (dialog.ShowDialog() == true && IsVisible && dialog.Result is not null)
             {
                 SaveRuleWithFeedback(dialog.Result);
                 LoadRules();
