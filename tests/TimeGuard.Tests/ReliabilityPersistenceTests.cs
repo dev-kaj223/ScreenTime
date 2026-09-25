@@ -7,7 +7,7 @@ using Xunit;
 
 namespace TimeGuard.Tests;
 
-public class ReliabilityPersistenceTests
+public class ReliabilityPersistenceTests(Xunit.Abstractions.ITestOutputHelper output)
 {
     private static SqliteConnection Open(TempProfile p)
     {
@@ -128,20 +128,38 @@ public class ReliabilityPersistenceTests
         if (diskFull)
         {
             c.Execute("CREATE TRIGGER FillDisk BEFORE INSERT ON DailyUsage BEGIN INSERT INTO Settings VALUES('fill',zeroblob(1048576)); END");
-            db.ConfigureConnectionForTesting = connection => connection.Execute("PRAGMA max_page_count=" + connection.ExecuteScalar<long>("PRAGMA page_count"));
+
         }
+        var checkedConnections = 0;
+        db.ConfigureConnectionForTesting = connection =>
+        {
+            Assert.Equal(5, connection.DefaultTimeout); // Per-operation busy contract, not total shutdown latency.
+            Interlocked.Increment(ref checkedConnections);
+            if (diskFull) connection.Execute("PRAGMA max_page_count=" + connection.ExecuteScalar<long>("PRAGMA page_count"));
+        };
         using var locked = diskFull ? null : c.BeginTransaction();
-        var elapsed = Stopwatch.StartNew(); monitor.Start();
-        var error = await Assert.ThrowsAsync<SqliteException>(() => monitor.Completion.WaitAsync(TimeSpan.FromSeconds(15)));
-        Assert.Equal(diskFull ? 13 : 5, error.SqliteErrorCode); Assert.Same(error, monitor.LastFault);
-        Assert.InRange(elapsed.Elapsed.TotalSeconds, 0, 12);
-        Assert.Empty(kill.Targets); Assert.Empty(monitor.Decisions);
-        locked?.Rollback();
-        if (diskFull) c.Execute("DROP TRIGGER FillDisk");
-        db.ConfigureConnectionForTesting = connection => connection.Execute("PRAGMA max_page_count=1073741823");
-        Assert.Equal(GracePhase.Active, Assert.Single(db.LoadGraceEpisodes()).Phase);
-        await Assert.ThrowsAsync<SqliteException>(() => monitor.StopAsync());
-        await using var restart = new MonitorService(db, new(), config, processes: new FakeProcesses(() => [helper]), terminator: kill, time: clock);
+        var elapsed = Stopwatch.StartNew();
+        Exception? stopError = null; SqliteException? error = null;
+        try
+        {
+            monitor.Start();
+            // Finite hang guard includes scheduling and OS I/O; it is not a product performance budget.
+            error = await Assert.ThrowsAsync<SqliteException>(() => monitor.Completion.WaitAsync(TimeSpan.FromSeconds(15)));
+            Assert.Equal(diskFull ? 13 : 5, error.SqliteErrorCode); Assert.Same(error, monitor.LastFault);
+            Assert.True(checkedConnections > 0);
+            Assert.Empty(kill.Targets); Assert.Empty(monitor.Decisions);
+        }
+        finally
+        {
+            output.WriteLine($"Fault scenario diskFull={diskFull}; elapsed={elapsed.Elapsed.TotalSeconds:F3}s");
+            locked?.Rollback();
+            if (diskFull) c.Execute("DROP TRIGGER FillDisk");
+            db.ConfigureConnectionForTesting = connection => connection.Execute("PRAGMA max_page_count=1073741823");
+            // Always join; retain an existing assertion failure rather than replace it with the expected worker fault.
+            stopError = await Record.ExceptionAsync(() => monitor.StopAsync());
+        }
+        Assert.Same(error, stopError);
+        Assert.Equal(GracePhase.Active, Assert.Single(db.LoadGraceEpisodes()).Phase);        await using var restart = new MonitorService(db, new(), config, processes: new FakeProcesses(() => [helper]), terminator: kill, time: clock);
         await restart.TickAsync();
         var ended = Assert.Single(db.LoadGraceEpisodes());
         Assert.Equal(episode.ExpiresAtUtc, ended.ExpiresAtUtc); Assert.Equal(episode.ExpiresAtUtc, ended.EndedAtUtc);

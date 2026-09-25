@@ -133,7 +133,7 @@ public class BrandingTests
         CapturePixels(captureBounds.Rectangle, name);
     }
 
-    private static void CaptureShellIcon(AppFixture fixture, bool taskbar)
+    internal static void CaptureShellIcon(AppFixture fixture, bool taskbar, string prefix = "phase8")
     {
         using var dpi = new PhysicalPixelScope();
         var desktop = fixture.Automation.GetDesktop();
@@ -158,7 +158,7 @@ public class BrandingTests
             }
             Assert.True(SpinWait.SpinUntil(() => (icon = FindIcon()) is not null, TimeSpan.FromSeconds(3)),
                 "The fixture's ScreenTime shell icon must be visible for the final capture.");
-            CapturePixels(icon!.BoundingRectangle, taskbar ? "phase8-taskbar.png" : "phase8-tray.png");
+            CapturePixels(icon!.BoundingRectangle, taskbar ? prefix + "-taskbar.png" : prefix + "-tray.png");
         }
         finally
         {

@@ -47,3 +47,7 @@ Branding is centralized in `src/TimeGuard.App/Branding/ScreenTimeBranding.xaml`.
 ## License and provenance
 
 ScreenTime is derived from [debmis/TimeGuard](https://github.com/debmis/TimeGuard). The original MIT copyright and permission notice are preserved in [LICENSE](LICENSE). Upstream features and download links are historical context, not the current ScreenTime product contract.
+
+## Portable package preparation
+
+See [release procedure](docs/RELEASE.md) for the unsigned self-contained Windows x64 folder ZIP, explicit production profile, verification and preserved license notices. Package CI uploads candidates only; it does not publish a GitHub Release. Keep every extracted file together. Autostart is disabled; launch manually.

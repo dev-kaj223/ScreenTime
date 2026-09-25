@@ -55,9 +55,11 @@ public class AppFixture : IDisposable
         return (Convert.ToBase64String(hashBytes), Convert.ToBase64String(saltBytes));
     }
 
+    protected virtual string AppExecutable => Path.Combine(AppContext.BaseDirectory, "App", "ScreenTime.exe");
+
     private void Launch()
     {
-        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "App", "ScreenTime.exe"))
+        var info = new ProcessStartInfo(AppExecutable)
         { UseShellExecute = false };
         info.ArgumentList.Add("--test-profile");
         info.ArgumentList.Add(Runtime.Paths.Root);
@@ -71,6 +73,22 @@ public class AppFixture : IDisposable
         Thread.Sleep(2500);
         if (process.HasExited) throw new InvalidOperationException("Isolated app exited during startup.");
     }
+
+    public void StopApplication()
+    {
+        if (_appIdentity is null) return;
+        using var process = Process.GetProcessById(_appIdentity.Id);
+        _ = process.Handle; // Retain the owned handle through graceful exit and ExitCode inspection.
+        if (!_appIdentity.Matches(process)) throw new InvalidOperationException("Lost fixture application ownership.");
+        using var stop = EventWaitHandle.OpenExisting(Runtime.StopEventName);
+        stop.Set();
+        if (!process.WaitForExit(8000)) throw new TimeoutException("Owned application did not shut down cleanly.");
+        if (process.ExitCode != 0) throw new InvalidOperationException($"Owned application exited {process.ExitCode}.");
+        _appIdentity = null;
+        _app?.Dispose(); _automation?.Dispose(); _app = null; _automation = null;
+    }
+
+    public void RestartApplication() { StopApplication(); Launch(); }
 
     public void RequestSettings()
     {

@@ -2,6 +2,9 @@
 
 This compact ledger records accepted choices, not a new product proposal. [PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md) is the consolidated contract; [REVIEW_PROTOCOL.md](REVIEW_PROTOCOL.md) governs delivery. Detailed historical reasoning stays in the linked sources.
 
+
+Phase 8 is integrated by normal merge `0224f432b65095db4dee59522173ec0267f3e0cb` (PR #4). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/4#pullrequestreview-5318740660) cleared `6b48ac4`, closing H8/P8-G1 with approved B artwork, full author Core 218/UI 69, fresh reviewer Core 218/affected UI 6, CI and preservation evidence. The historical [Phase 8 report](PHASE8_IMPLEMENTATION.md) retains writing-time limits. A subsequent integration-CI timing assertion failure is tracked as [Phase 9 validation follow-up P9-V1](https://github.com/dev-kaj223/ScreenTime/pull/4#issuecomment-5834049344), not erased from prior history.
+
 ## Authority and phase status
 
 The owner confirmed on 2026-09-24 that Phases 1–4 are complete, validated, committed and pushed. Local history ends at `3b1dbec` (Phase 4), following `90f7538` (Phase 3), `d57ffcd` (Phase 2) and the Phase 1 commits. Original report statements such as “no commit or push” describe their writing time. Preserve those documents and history; do not manufacture later test results or erase their stated limitations.
@@ -51,6 +54,10 @@ Routine presentation choice under D21: Standard retains all notices and defaults
 ### D23 — Filled-base hourglass (2026-09-25)
 
 The owner explicitly selected **option B — Filled base** from the two original vector candidates shown at 16/32 pixels and larger header size, with dark tray/notice mockups: "I select option B - Fill base". This closes the H8 visual-choice gate. The selected neutral `#D7DEE9` mark is the exact B geometry in the comparison, retained centrally in `Branding/ScreenTimeBranding.xaml` with its 32-DIP canvas. The same resource feeds WPF windows/notices, tray icons and the generated multi-size executable ICO. No other visual redesign, notification behavior, policy, profile or startup change is authorized by this choice. Final asset validation and independent review remain required; selection alone is not merge clearance.
+
+### D24 — Explicit portable distribution (2026-09-25)
+
+Phase 9 implements the owner objective and architecture section 4: packaging deliberately selects a separate Production `%AppData%\ScreenTime` profile; ordinary builds remain Development and Test remains isolated. No new startup registration was selected, so manual launch and disabled autostart preserve installed TimeGuard. No legacy import, watchdog, signing or public publication is included. A self-contained folder ZIP is the routine implementation choice: explicit runtime/native files avoid self-extraction and support exact file hashes/module-path/license inspection. Keep the whole folder together. The minimal Microsoft.Data.Sqlite 8.0.31 servicing change addresses the discovered native SQLite advisory without changing policy or schema. Pinned SDK/runtime, locked dependencies, actual notices and exact-artifact smoke/reproducibility evidence are required; signing/public distribution remains owner-controlled.
 
 ### Historical setup decisions
 

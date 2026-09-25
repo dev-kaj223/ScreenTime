@@ -3,7 +3,7 @@ using System.Text;
 
 namespace TimeGuard.Services;
 
-public enum RuntimeProfile { Development, Test, LegacyProduction }
+public enum RuntimeProfile { Development, Test, LegacyProduction, Production }
 
 public sealed class RuntimeOptions
 {
@@ -26,7 +26,17 @@ public sealed class RuntimeOptions
         if (profile != RuntimeProfile.LegacyProduction &&
             (paths.Root.Equals(legacyRoot, StringComparison.OrdinalIgnoreCase) ||
              paths.Root.StartsWith(legacyRoot + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)))
-            throw new ArgumentException("Development/test profiles cannot use the installed TimeGuard directory.");
+            throw new ArgumentException("ScreenTime profiles cannot use the installed TimeGuard directory.");
+        if (profile == RuntimeProfile.Test)
+        {
+            foreach (var name in new[] { "ScreenTime", "ScreenTime-Dev" })
+            {
+                var reserved = Path.GetFullPath(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), name));
+                if (paths.Root.Equals(reserved, StringComparison.OrdinalIgnoreCase) ||
+                    paths.Root.StartsWith(reserved + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase))
+                    throw new ArgumentException("Test profiles cannot use an existing ScreenTime user profile.");
+            }
+        }
         Profile = profile;
         Paths = paths;
         var identity = Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(
@@ -39,7 +49,11 @@ public sealed class RuntimeOptions
         RuntimeProfile.Development, new AppDataPaths(Path.Combine(appDataRoot ??
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScreenTime-Dev")));
 
-    // Kept for deliberate legacy packaging; neither Debug nor Release selects it implicitly.
+    public static RuntimeOptions Production(string? appDataRoot = null) => new(
+        RuntimeProfile.Production, new AppDataPaths(Path.Combine(appDataRoot ??
+            Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "ScreenTime")));
+
+    // Legacy identity is retained for preservation comparisons, never selected by launch arguments.
     public static RuntimeOptions LegacyProduction(string? appDataRoot = null) => new(
         RuntimeProfile.LegacyProduction, new AppDataPaths(Path.Combine(appDataRoot ??
             Environment.GetFolderPath(Environment.SpecialFolder.ApplicationData), "TimeGuard"), "timeguard.db"));
@@ -52,7 +66,8 @@ public sealed class RuntimeOptions
         return new(RuntimeProfile.Test, new AppDataPaths(Path.GetDirectoryName(fullPath)!, Path.GetFileName(fullPath)));
     }
 
-    public static RuntimeOptions Resolve(string[] args, string? testDatabase = null)
+    public static RuntimeOptions Resolve(string[] args, string? testDatabase = null,
+        bool distributionBuild = false, string? appDataRoot = null)
     {
         string? Value(string flag)
         {
@@ -68,8 +83,9 @@ public sealed class RuntimeOptions
         if (!string.IsNullOrWhiteSpace(db)) return TestDatabase(db);
         return Value("--profile") switch
         {
-            null or "development" => Development(),
-            "legacy-production" => LegacyProduction(),
+            null => distributionBuild ? Production(appDataRoot) : Development(appDataRoot),
+            "development" => Development(appDataRoot),
+            "production" when distributionBuild => Production(appDataRoot),
             _ => throw new ArgumentException("Unknown runtime profile.")
         };
     }

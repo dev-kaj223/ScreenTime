@@ -1,0 +1,17 @@
+{
+  "Dapper": ["Apache-2.0.txt", "Dapper-LICENSE.txt"],
+  "Microsoft.Data.Sqlite": ["Microsoft.Data.Sqlite-LICENSE.txt"],
+  "Microsoft.Data.Sqlite.Core": ["Microsoft.Data.Sqlite-LICENSE.txt"],
+  "Microsoft.NETCore.Platforms": ["NET-Runtime-LICENSE.txt"],
+  "Microsoft.Win32.Registry": ["NET-Runtime-LICENSE.txt"],
+  "OxyPlot.Core": ["OxyPlot-LICENSE.txt"],
+  "OxyPlot.Wpf": ["OxyPlot-LICENSE.txt"],
+  "OxyPlot.Wpf.Shared": ["OxyPlot-LICENSE.txt"],
+  "SQLitePCLRaw.bundle_e_sqlite3": ["SQLitePCLRaw-LICENSE.txt", "SQLitePCLRaw-NOTICE.txt"],
+  "SQLitePCLRaw.core": ["SQLitePCLRaw-LICENSE.txt", "SQLitePCLRaw-NOTICE.txt"],
+  "SQLitePCLRaw.lib.e_sqlite3": ["SQLitePCLRaw-LICENSE.txt", "SQLitePCLRaw-NOTICE.txt"],
+  "SQLitePCLRaw.provider.e_sqlite3": ["SQLitePCLRaw-LICENSE.txt", "SQLitePCLRaw-NOTICE.txt"],
+  "System.Memory": ["NET-Runtime-LICENSE.txt"],
+  "System.Security.AccessControl": ["NET-Runtime-LICENSE.txt"],
+  "System.Security.Principal.Windows": ["NET-Runtime-LICENSE.txt"]
+}

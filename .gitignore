@@ -27,3 +27,6 @@ publish/
 
 # App data (runtime files, not source)
 *.log
+
+# Isolated packaging stages, manifests, archives and validation artifacts
+artifacts/

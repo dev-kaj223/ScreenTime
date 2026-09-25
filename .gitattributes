@@ -1,0 +1,5 @@
+# Preserve upstream license/notice bytes, including intentional whitespace.
+packaging/licenses/* -text whitespace=-blank-at-eol,-blank-at-eof
+# Stable package text bytes across Windows checkout settings.
+packaging/*.txt text eol=lf
+packaging/*.json text eol=lf
