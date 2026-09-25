@@ -41,6 +41,7 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
         var dashboard = OpenDashboard();
         Assert.Contains("Dashboard", dashboard.Title);
         dashboard.Close();
+        _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings").Close();
     }
 
     [Fact]
@@ -54,5 +55,6 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
                               || e.Name?.Contains("breakdown") == true);
         Assert.NotNull(header);
         dashboard.Close();
+        _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings").Close();
     }
 }

@@ -39,6 +39,8 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, DateTimeOffset> _blockedNotices = [];
     private IReadOnlyList<NotificationRequest> _notificationFacts = Array.Empty<NotificationRequest>();
     public IReadOnlyList<NotificationRequest> NotificationFacts => Volatile.Read(ref _notificationFacts);
+    private StatusSnapshot? _status;
+    public StatusSnapshot? Status => Volatile.Read(ref _status);
 
     // Pull-only bounded mailbox: the enforcement worker never invokes presentation code.
     public bool TryReadNotification(out NotificationRequest? request)
@@ -263,6 +265,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 if (!_sessions.ContainsKey(name)) _sessions[name] = _db.OpenSession(name);
 
             var decisions = new List<PolicyDecision>();
+            var status = new List<AppStatus>();
             var instanceDecisions = new List<(PolicyDecision Decision, ProcessInstance Instance)>();
             var eligible = new List<ProcessInstance>();
             // An inaccessible capture must not escape deadline enforcement just because
@@ -299,6 +302,11 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                     _db.UpsertUsageEntry(today, entry);
                 }
                 decisions.Add(decision);
+                if (rule.Enabled)
+                {
+                    var usage = _log.Entries.FirstOrDefault(e => e.ProcessName == rule.ProcessName);
+                    status.Add(new(snapshot, decision, usage?.ObservedSeconds ?? 0, usage?.GraceSeconds ?? 0));
+                }
             }
             Volatile.Write(ref _decisions, decisions.AsReadOnly());
             _accounting.SetEligible(eligible);
@@ -306,6 +314,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
             foreach (var (decision, instance) in instanceDecisions.Where(d => d.Decision.TerminationRequired))
                 results.Add(await _enforcement.EnforceAsync(decision, instance, ct).ConfigureAwait(false));
             Volatile.Write(ref _enforcementResults, results.AsReadOnly());
+            Volatile.Write(ref _status, new StatusSnapshot(now, status.AsReadOnly()));
             foreach (var result in results.Where(r => r.Outcome is TerminationOutcome.Terminated or TerminationOutcome.AlreadyExited))
                 _accounting.Forget(result.Target);
             var next = _downtime.MidnightAfter(now);

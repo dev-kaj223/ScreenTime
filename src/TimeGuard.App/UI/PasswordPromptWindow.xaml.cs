@@ -10,6 +10,7 @@ namespace TimeGuard.UI;
 public partial class PasswordPromptWindow : Window
 {
     private readonly DatabaseService _db;
+    internal string Password => PasswordBox.Password;
 
     public PasswordPromptWindow(DatabaseService db)
     {

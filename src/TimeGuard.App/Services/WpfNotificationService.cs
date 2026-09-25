@@ -9,25 +9,38 @@ internal sealed class WpfNotificationService : IDisposable
 {
     private readonly DispatcherTimer _timer = new() { Interval = TimeSpan.FromMilliseconds(250) };
     private PassiveNoticeWindow? _window;
+    private readonly Dictionary<string, NotificationRequest> _countdowns = [];
 
     internal WpfNotificationService(Func<NotificationRequest?> read, Func<NotificationRequest, bool> current,
-        IAppLogger? logger, Action<NoticeDiagnostic>? diagnostic = null)
+        IAppLogger? logger, Action<NoticeDiagnostic>? diagnostic = null, Func<NotificationPreferences>? preferences = null)
     {
         _timer.Tick += (_, _) =>
         {
             try
             {
+                var options = preferences?.Invoke() ?? NotificationPreferences.Standard;
                 NotificationRequest? latest = null;
                 for (var i = 0; i < 8; i++)
                 {
                     var next = read();
                     if (next is null) break;
-                    if (current(next)) latest = next;
+                    if (!current(next) || !options.Allows(next.Kind)) continue;
+                    if (next.Kind == NotificationKind.GraceFinalMinute)
+                    {
+                        if (_countdowns.Count < 8 || _countdowns.ContainsKey(next.AppKey)) _countdowns[next.AppKey] = next;
+                    }
+                    else latest = next;
+                }
+                foreach (var countdown in _countdowns.Values.ToArray())
+                {
+                    if (!current(countdown) || !options.Allows(countdown.Kind)) { _countdowns.Remove(countdown.AppKey); continue; }
+                    if (options.Ready(countdown, DateTimeOffset.UtcNow)) { latest = countdown; _countdowns.Remove(countdown.AppKey); }
                 }
                 if (latest is null) return;
                 _window?.Close();
                 var request = latest;
-                var window = new PassiveNoticeWindow(request, () => current(request), diagnostic);
+                var window = new PassiveNoticeWindow(request, () => current(request) &&
+                    (preferences?.Invoke() ?? NotificationPreferences.Standard).Allows(request.Kind), diagnostic, options);
                 _window = window;
                 window.Closed += (_, _) => { if (_window == window) _window = null; };
                 window.Show();
@@ -42,5 +55,5 @@ internal sealed class WpfNotificationService : IDisposable
         _timer.Start();
     }
 
-    public void Dispose() { _timer.Stop(); _window?.Close(); _window = null; }
+    public void Dispose() { _timer.Stop(); _countdowns.Clear(); _window?.Close(); _window = null; }
 }

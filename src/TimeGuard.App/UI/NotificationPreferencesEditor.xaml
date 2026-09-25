@@ -1,0 +1,37 @@
+<UserControl x:Class="TimeGuard.UI.NotificationPreferencesEditor"
+ xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+ xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml" Foreground="#F0F0F0">
+ <ScrollViewer VerticalScrollBarVisibility="Auto">
+  <StackPanel Margin="16">
+   <TextBlock Text="Notification appearance only — limits and enforcement always apply." TextWrapping="Wrap" Margin="0,0,0,10"/>
+   <ComboBox x:Name="PresetBox" Width="180" HorizontalAlignment="Left" SelectionChanged="OnPresetChanged"/>
+   <TextBlock Text="Standard: all notices. Minimal: session start, final countdown and blocked notices." TextWrapping="Wrap" FontSize="11" Margin="0,6,0,10"/>
+   <WrapPanel>
+    <CheckBox x:Name="QuotaTen" Content="10-minute quota" Margin="0,4,16,4"/>
+    <CheckBox x:Name="QuotaFive" Content="5-minute quota" Margin="0,4,16,4"/>
+    <CheckBox x:Name="GraceStart" Content="Finish session" Margin="0,4,16,4"/>
+    <CheckBox x:Name="GraceFive" Content="5-minute grace" Margin="0,4,16,4"/>
+    <CheckBox x:Name="FinalMinute" Content="Final countdown" Margin="0,4,16,4"/>
+    <CheckBox x:Name="BlockedNotice" Content="Blocked / expired" Margin="0,4,16,4"/>
+   </WrapPanel>
+   <StackPanel Orientation="Horizontal" Margin="0,8">
+    <TextBlock Text="Countdown duration (1–60 seconds):" VerticalAlignment="Center"/>
+    <TextBox x:Name="CountdownBox" Width="55" Margin="10,0,0,0"/>
+   </StackPanel>
+   <TextBlock Text="Optional accent colors (#RRGGBB); blank uses the approved defaults." TextWrapping="Wrap"/>
+   <WrapPanel Margin="0,8">
+    <StackPanel Margin="0,0,12,0"><TextBlock Text="Informational"/><TextBox x:Name="InfoColor" Width="110"/></StackPanel>
+    <StackPanel Margin="0,0,12,0"><TextBlock Text="Warning"/><TextBox x:Name="WarnColor" Width="110"/></StackPanel>
+    <StackPanel><TextBlock Text="Critical"/><TextBox x:Name="CriticalColor" Width="110"/></StackPanel>
+   </WrapPanel>
+   <TextBlock Text="Preview shows an example notification, even when disabled. It does not affect app limits." TextWrapping="Wrap" FontSize="11" Margin="0,4,0,8"/>
+   <WrapPanel>
+    <ComboBox x:Name="PreviewKind" Width="155" Margin="0,0,8,8"/>
+    <Button Content="Preview" Click="OnPreview" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
+    <Button Content="Reset to defaults" Click="OnReset" Style="{StaticResource SecondaryButton}" Margin="0,0,8,8"/>
+   </WrapPanel>
+   <TextBlock x:Name="ErrorText" Foreground="#FF9999" TextWrapping="Wrap"/>
+   <TextBlock Text="Preferences are applied when you Save settings." FontSize="11"/>
+  </StackPanel>
+ </ScrollViewer>
+</UserControl>

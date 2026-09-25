@@ -23,7 +23,8 @@ internal sealed class PassiveNoticeWindow : Window
     private IntPtr _hwnd;
     internal NotificationRequest Request { get; }
 
-    internal PassiveNoticeWindow(NotificationRequest request, Func<bool> current, Action<NoticeDiagnostic>? diagnostic)
+    internal PassiveNoticeWindow(NotificationRequest request, Func<bool> current, Action<NoticeDiagnostic>? diagnostic,
+        NotificationPreferences? preferences = null)
     {
         Request = request;
         _current = current;
@@ -37,6 +38,7 @@ internal sealed class PassiveNoticeWindow : Window
         ShowActivated = false; ShowInTaskbar = false; Focusable = false; IsHitTestVisible = false;
         KeyboardNavigation.SetTabNavigation(this, KeyboardNavigationMode.None);
         var (heading, accentColor) = NoticePresentation.Style(request);
+        accentColor = preferences?.ColorFor(request.Kind) ?? accentColor;
         var accent = new SolidColorBrush((Color)System.Windows.Media.ColorConverter.ConvertFromString(accentColor));
         var stack = new StackPanel();
         var brand = new StackPanel { Orientation = System.Windows.Controls.Orientation.Horizontal, HorizontalAlignment = System.Windows.HorizontalAlignment.Center,
