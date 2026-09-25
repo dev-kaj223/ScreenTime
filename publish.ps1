@@ -1,7 +1,7 @@
 <#
 .SYNOPSIS
-    Publishes TimeGuard as a self-contained single-file exe and packages it
-    as release/TimeGuard-win-x64.zip.
+    Publishes ScreenTime as a self-contained single-file exe and packages it
+    as release/ScreenTime-win-x64.zip.
 
 .EXAMPLE
     .\publish.ps1
@@ -41,13 +41,13 @@ dotnet publish "$root\src\TimeGuard.App" `
     -v q
 if ($LASTEXITCODE -ne 0) { Write-Host "Publish failed." -ForegroundColor Red; exit 1 }
 
-Write-Host "[4/4] Packaging release/TimeGuard-win-x64.zip..." -ForegroundColor Cyan
+Write-Host "[4/4] Packaging release/ScreenTime-win-x64.zip..." -ForegroundColor Cyan
 $releaseDir = Join-Path $root "release"
 New-Item -ItemType Directory -Force -Path $releaseDir | Out-Null
-$zipPath = Join-Path $releaseDir "TimeGuard-win-x64.zip"
+$zipPath = Join-Path $releaseDir "ScreenTime-win-x64.zip"
 # IncludeNativeLibrariesForSelfExtract bundles all native DLLs into the exe.
-# DebugType=None suppresses PDBs. Zip contains only TimeGuard.exe.
-Compress-Archive -Path "$publishDir\TimeGuard.exe" -DestinationPath $zipPath -Force
+# DebugType=None suppresses PDBs. Zip contains only ScreenTime.exe.
+Compress-Archive -Path "$publishDir\ScreenTime.exe" -DestinationPath $zipPath -Force
 
 $sizeMB = [math]::Round((Get-Item $zipPath).Length / 1MB, 1)
-Write-Host "`n✅ Done!  release\TimeGuard-win-x64.zip  ($sizeMB MB)" -ForegroundColor Green
+Write-Host "`n✅ Done!  release\ScreenTime-win-x64.zip  ($sizeMB MB)" -ForegroundColor Green

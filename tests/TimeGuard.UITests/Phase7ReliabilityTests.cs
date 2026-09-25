@@ -11,7 +11,7 @@ public class Phase7ReliabilityTests
 {
     private static ProcessStartInfo StartInfo(string profile)
     {
-        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "App", "TimeGuard.exe")) { UseShellExecute = false };
+        var info = new ProcessStartInfo(Path.Combine(AppContext.BaseDirectory, "App", "ScreenTime.exe")) { UseShellExecute = false };
         info.ArgumentList.Add("--test-profile"); info.ArgumentList.Add(profile);
         info.Environment.Remove("TIMEGUARD_TEST_DB"); return info;
     }

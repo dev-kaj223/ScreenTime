@@ -1,0 +1,29 @@
+# Phase 8 — User-facing naming and shared branding
+
+Base: `cb2d6d08a519cc8fa779e14124d3588f1163cae5`, the approved Phase 7 normal merge into `screentime-dev`. This checkpoint implements the safe naming and shared-resource work. **The owner's H8 hourglass choice is still pending. The exported ICO intentionally contains the existing interim clock. This is not final Phase 8 completion or merge approval.**
+
+## Scope
+
+Setup, protected access, settings and history now use ScreenTime wording. Existing setup/password fields and all automation IDs stay stable. Active windows consume the same `ScreenTimeBrandImage` resource already used by notices and the tray. The protected access prompt describes both Settings and Exit without parental-control wording; hashing and authorization logic are unchanged.
+
+The app assembly/output name becomes `ScreenTime`, producing `ScreenTime.exe` with ScreenTime product/title metadata. This limited output rename is necessary for user-visible executable identity. Namespaces, project/solution paths, Core assembly, friend test assemblies, storage paths, profiles, startup entry logic, test environment compatibility and enforcement remain unchanged. Pack-resource URIs and fixture executable paths follow the renamed assembly. Existing packaging script/workflow strings now name ScreenTime artifacts; their triggers, publish/profile behavior and release logic are unchanged and remain Phase 9 work.
+
+The shared resource supplies WPF images and runtime tray icons. `tools/Generate-BrandingIcon.ps1` renders that same XAML into a checked-in Windows ICO at 16, 20, 24, 32, 40, 48, 64, 128 and 256 pixels. `-Verify` checks the export without modifying it. The app embeds this ICO as its executable icon and WPF resource. Tests compare every decoded exported frame with the runtime vector rendering; there is no separate hand-maintained tray or packaging design.
+
+README now describes current behavior, development build/run/profile isolation and actual testing prerequisites, rather than advertising upstream downloads or deferred features. MIT LICENSE is untouched and upstream attribution remains linked. Consolidated requirements/decisions record Phase 7 integration and its final independent review; historical Phase 1–7 reports are unchanged.
+
+## Visual decision still required
+
+Two original code-native geometric hourglass candidates were rendered for the owner: **A — Open outline** and **B — Filled base**, both in the existing neutral `#D7DEE9`, at actual 16/32 pixels and 56 pixels, with dark tray/notice presentation mockups. Neither is selected by default or treated as approved. After an explicit choice, replace only the centralized vector, regenerate its ICO, inspect actual app captures and run final applicable validation/review. No broad visual redesign or notification behavior/layout change is proposed.
+
+## Validation at this checkpoint
+
+Restore and nonincremental Release build passed with only the pre-existing Dashboard CS0618 warning (WPF temporary/final compilation). Initial restore required approved read access to the existing user NuGet configuration; no configuration was changed. Full Core: **218 passed, zero failed/skipped**. ICO generation and `-Verify` pass against the interim clock. Full serialized interim-asset UI run: **66 passed / 2 failed / 0 skipped, 68 total**, in 5m03s. All 64 prior cases and two new branding cases passed, including the six-state native probe. The two new-test failures were assertion assumptions: the inherited clock arc extends 0.005 DIP left of zero, and ExtractIconEx returns two extracted icons when both large and small are requested. The corrected checks use a narrow 0.01-DIP bounds tolerance, the actual two-icon count, and additionally compare every pixel of the native extracted icons to the shared export. The subsequent rebuilt focused branding suite passed **4/4**. No production or shared-fixture change followed the complete run; these focused assertion corrections do not replace the still-pending final hourglass validation.
+
+The native probe recorded **369 samples**, six real mouse/key pairs, ordinary lifetimes **6.036 / 6.059 / 6.009 / 6.075 / 6.070 seconds**, and **60 descending countdown values over 59.867 seconds**. Foreground, native styles/messages, no activation/focus/capture/minimization and pass-through assertions passed. This remains interim-clock evidence, not final hourglass acceptance.
+
+New branding checks exercise ScreenTime assembly/executable metadata, native extraction of large/small embedded executable icons, all nine exported frames matching the shared runtime vector, real setup-window native icon/title/password-control IDs, and passive notice resource binding with 125% text rendered at 100/150/200% pixel scaling. These rendered scale checks do not claim a physical mixed-monitor or Windows accessibility-setting matrix. Existing native mouse/key/foreground/countdown, status/tray, protected-command, weekday/downtime and owned-helper regressions remain required.
+
+Installed preservation baseline before UI: three installed TimeGuard file paths/hashes, seven HKCU Run values, zero TimeGuard-named processes. Final read-only comparison after all fixtures exited confirmed all three file paths/SHA-256 hashes and seven Run values unchanged; zero TimeGuard and ScreenTime processes remained. Runtime profiles remain disposable and helper ownership checks remain intact. No real game, legacy-production launch, installation, release publication, signing or production-profile migration is performed.
+
+No policy, accounting, grace/deadline or persistence code changed, so another real 20-minute gate is not triggered by this diff. Independent review still determines any applicable manual/native acceptance gate from the final changed asset and evidence. Final owner visual choice, final asset validation, GitHub CI and independent review remain merge gates.

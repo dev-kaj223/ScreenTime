@@ -36,7 +36,7 @@ public class TestIsolationTests
     {
         using var fixture = new SeededAppFixture();
         fixture.RequestSettings();
-        _ = fixture.App.WaitForWindow(fixture.Automation, "Parent Access");
+        _ = fixture.App.WaitForWindow(fixture.Automation, "Protected Access");
         using var process = Process.GetProcessById(fixture.App.ProcessId);
         using var signal = EventWaitHandle.OpenExisting(fixture.Runtime.StopEventName);
         signal.Set();

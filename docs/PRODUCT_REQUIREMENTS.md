@@ -6,6 +6,8 @@ Phases 1–5 are approved and integrated through `378f9fbf245193089ce55271a10e7c
 
 Phase 6 is integrated by normal merge `899ed1344137472bed5dcf1e5e871504b2e719b0` (PR #2). The [final independent Phase 6 review](https://github.com/dev-kaj223/ScreenTime/pull/2#pullrequestreview-5313944356) cleared `4951d1a` with 204 Core tests, 58 UI tests, successful CI and preservation checks, and no additional manual gate. Its fresh native probe cleared the implementation-side foreground-precondition limitation; the historical [Phase 6 report](PHASE6_IMPLEMENTATION.md) remains unchanged.
 
+Phase 7 is integrated by normal merge `cb2d6d08a519cc8fa779e14124d3588f1163cae5` (PR #3). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/3#pullrequestreview-5314429938) cleared `1758006` with 218 Core tests, 64 UI tests, successful CI and preservation checks, a verified real 20-minute original-deadline scenario and five-minute resource soak, and no additional manual gate. The historical [Phase 7 report](PHASE7_IMPLEMENTATION.md) keeps its writing-time validation limits.
+
 ## Product and safety boundary
 
 - Lightweight, local-only, offline-capable Windows ScreenTime-style app, in the interactive user's session. Evolve the existing .NET/WPF app rather than adding a privileged service or new framework.
@@ -64,6 +66,12 @@ The original interactive/topmost TimeGuard warning caused visible Apex disruptio
 - Configuration and credential pairs must not be partially published by a failed write or mixed across concurrent reads. Corrupt or unsupported databases must remain intact for diagnosis; never silently reset them or fall back to installed TimeGuard.
 - Persistent storage failure retains the supervised nonzero failure path. Bounded SQLite busy waits do not authorize an uncommitted grace grant, an uncommitted expiry kill, a replacement deadline, an automatic watchdog or a new strict fail-safe mode.
 - Test realistic faults and lifecycle races in disposable profiles. Report the actual duration, configuration and measurements for resource checks; an accelerated stress test is not evidence of multi-day stability or an unmeasured performance budget.
+
+## Phase 8: user-facing naming and branding
+
+- Use ScreenTime for user-facing naming, titles, executable/product metadata and artifact names. Keep namespaces, project paths, profiles and storage identities stable unless a minimal output-name change is needed for `ScreenTime.exe`.
+- Replace the centralized interim mark with the owner-selected hourglass; WPF windows, notices, tray and exported executable/package icons must derive from that shared artwork. The exact hourglass appearance remains an explicit owner decision, not an implementation default.
+- Preserve automation IDs, protected commands, passive notification behavior and existing layout. This is naming/branding polish, not a broad UI redesign or Phase 9 distribution/profile change. Keep upstream license attribution.
 
 ## Deferred unless explicitly promoted
 

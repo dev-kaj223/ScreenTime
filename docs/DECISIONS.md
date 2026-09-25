@@ -8,6 +8,8 @@ The owner confirmed on 2026-09-24 that Phases 1–4 are complete, validated, com
 
 Use the current approved requirements and this ledger for product intent, the architecture for detailed phase design, and source/tests for implementation evidence. Later approved decisions can refine earlier design proposals; record the change and rationale here. An implementation or test is not authorization to change the product. Genuine contradictions or unspecified product behavior require an owner decision; routine implementation choices do not.
 
+Phase 7 is integrated by normal merge `cb2d6d08a519cc8fa779e14124d3588f1163cae5` (PR #3). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/3#pullrequestreview-5314429938) cleared `1758006` with 218 Core tests, 64 UI tests, successful CI and preservation checks, a verified real 20-minute original-deadline scenario and five-minute resource soak, and no additional manual gate. The historical [Phase 7 report](PHASE7_IMPLEMENTATION.md) keeps its writing-time validation limits.
+
 ## Accepted product choices
 
 Current integration also includes Phase 6 at `899ed1344137472bed5dcf1e5e871504b2e719b0` (PR #2). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/2#pullrequestreview-5313944356) cleared `4951d1a` with 204 Core/58 UI tests, CI/preservation success and no remaining manual gate. Earlier reports keep their writing-time evidence and limitations.

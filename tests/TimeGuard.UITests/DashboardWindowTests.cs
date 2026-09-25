@@ -19,7 +19,7 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
         // Open settings the same way SettingsWindowTests does
         _fx.RequestSettings();
 
-        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Parent Access");
+        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
         var boxes = prompt.FindAllDescendants(cf => cf.ByFrameworkId("WPF")
             .And(cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit)));
         if (boxes.Length > 0)
@@ -29,7 +29,7 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
         }
         prompt.FindButton("Unlock").Click();
 
-        var settings = _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings");
+        var settings = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
         settings.FindButton("📊 Dashboard").Click();
 
         return _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
@@ -41,7 +41,7 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
         var dashboard = OpenDashboard();
         Assert.Contains("Dashboard", dashboard.Title);
         dashboard.Close();
-        _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings").Close();
+        _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings").Close();
     }
 
     [Fact]
@@ -55,6 +55,6 @@ public class DashboardWindowTests : IClassFixture<SeededAppFixture>
                               || e.Name?.Contains("breakdown") == true);
         Assert.NotNull(header);
         dashboard.Close();
-        _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings").Close();
+        _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings").Close();
     }
 }

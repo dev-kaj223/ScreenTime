@@ -3,6 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         Title="Pick a Running Process"
         Width="340" Height="460"
+        Icon="{DynamicResource ScreenTimeBrandImage}"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource DarkBrush}">
     <Grid Margin="16">

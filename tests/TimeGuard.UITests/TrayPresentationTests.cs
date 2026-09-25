@@ -85,7 +85,7 @@ public class TrayPresentationTests
         Sta(() =>
         {
             var panel = new StatusPanel(); // Initialize WPF's pack-resource machinery before loading the dictionary.
-            var branding = new ResourceDictionary { Source = new Uri("/TimeGuard;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
+            var branding = new ResourceDictionary { Source = new Uri("/ScreenTime;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
             var brand = (ImageSource)branding["ScreenTimeBrandImage"];
             using var icon = TimeGuard.Branding.ScreenTimeBranding.CreateTrayIcon(brand);
             Assert.Equal(32, icon.Width);

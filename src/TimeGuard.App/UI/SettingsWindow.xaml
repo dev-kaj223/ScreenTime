@@ -2,9 +2,10 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:TimeGuard.UI"
-        Title="TimeGuard Settings"
+        Title="ScreenTime Settings"
         Width="700" Height="520"
         MinWidth="600" MinHeight="420"
+        Icon="{DynamicResource ScreenTimeBrandImage}"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource DarkBrush}">
     <Grid Margin="20">
@@ -16,7 +17,7 @@
 
         <!-- Header -->
         <StackPanel Grid.Row="0" Orientation="Horizontal" Margin="0,0,0,16">
-            <TextBlock Text="⚙️ TimeGuard Settings"
+            <TextBlock Text="⚙️ ScreenTime Settings"
                        Foreground="{StaticResource TextBrush}"
                        FontSize="18" FontWeight="Bold" VerticalAlignment="Center"/>
         </StackPanel>
@@ -159,7 +160,7 @@
                     <Separator Background="{StaticResource SurfaceBrush}" Margin="0,20"/>
 
                     <CheckBox x:Name="StartupCheckBox"
-                              Content="Launch TimeGuard when Windows starts"
+                              Content="Launch ScreenTime when Windows starts"
                               Foreground="{StaticResource TextBrush}"
                               Margin="0,0,0,0"
                               Checked="OnStartupToggle" Unchecked="OnStartupToggle"/>

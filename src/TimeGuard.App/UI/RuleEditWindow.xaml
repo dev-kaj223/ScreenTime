@@ -4,6 +4,7 @@
         Title="Edit App Rule"
         Width="560" Height="720"
         ResizeMode="NoResize"
+        Icon="{DynamicResource ScreenTimeBrandImage}"
         WindowStartupLocation="CenterOwner"
         Background="{StaticResource DarkBrush}">
     <ScrollViewer VerticalScrollBarVisibility="Auto">

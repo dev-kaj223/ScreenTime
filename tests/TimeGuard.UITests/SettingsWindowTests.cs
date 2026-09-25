@@ -28,7 +28,7 @@ public class SettingsWindowTests : IClassFixture<SeededAppFixture>
         _fx.RequestSettings();
 
         // Wait for PasswordPromptWindow
-        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Parent Access");
+        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
 
         var passwordBoxes = prompt.FindAllDescendants(cf =>
             cf.ByControlType(FlaUI.Core.Definitions.ControlType.Edit));
@@ -40,7 +40,7 @@ public class SettingsWindowTests : IClassFixture<SeededAppFixture>
 
         prompt.FindButton("Unlock").Click();
 
-        return _fx.App.WaitForWindow(_fx.Automation, "TimeGuard Settings");
+        return _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────

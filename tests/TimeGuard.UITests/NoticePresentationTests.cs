@@ -57,7 +57,7 @@ public class NoticePresentationTests
                 var shortNotice = new PassiveNoticeWindow(Request(NotificationKind.QuotaTenMinutes, now), () => true, null);
                 var longNotice = new PassiveNoticeWindow(Request(NotificationKind.GraceStarted, now, 1200) with
                     { DisplayName = new string('L', 200) }, () => true, null);
-                var branding = new ResourceDictionary { Source = new Uri("/TimeGuard;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
+                var branding = new ResourceDictionary { Source = new Uri("/ScreenTime;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
                 shortNotice.Resources.MergedDictionaries.Add(branding);
                 foreach (var notice in new[] { shortNotice, longNotice })
                 {
