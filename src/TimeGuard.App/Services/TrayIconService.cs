@@ -20,8 +20,6 @@ internal sealed class TrayIconService : IDisposable
     private System.Drawing.Point _dismissedAtCursor;
     private long _rightDismissedAt;
     private Forms.MouseButtons _pressedButton;
-    private long _lastRightUp;
-    private System.Drawing.Point _lastRightCursor;
     private bool _disposed;
     internal StatusPanel? Panel => _panel;
     internal bool IsDisposed => _disposed;
@@ -53,12 +51,6 @@ internal sealed class TrayIconService : IDisposable
     {
         if (_disposed || _pressedButton != button) return;
         _pressedButton = Forms.MouseButtons.None;
-        var cursor = Forms.Cursor.Position;
-        if (button == Forms.MouseButtons.Left && _lastRightUp != 0 &&
-            Environment.TickCount64 - _lastRightUp < 300 &&
-            Math.Abs(cursor.X - _lastRightCursor.X) <= 4 && Math.Abs(cursor.Y - _lastRightCursor.Y) <= 4)
-            return;
-        if (button == Forms.MouseButtons.Right) { _lastRightUp = Environment.TickCount64; _lastRightCursor = cursor; }
         HandleClick(button);
     }
 

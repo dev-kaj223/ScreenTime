@@ -141,6 +141,24 @@ public class Beta2PopupTests(Xunit.Abstractions.ITestOutputHelper output)
             var dashboard = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
             Find().Click(); Thread.Sleep(250);
             Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title.Contains("ScreenTime — Main")));
+            dashboard.Close();
+            var rapidIcon = Find();
+            var rapidBounds = rapidIcon.BoundingRectangle;
+            var rapidPoint = new System.Drawing.Point(rapidBounds.Left + rapidBounds.Width / 2,
+                rapidBounds.Top + rapidBounds.Height / 2);
+            if (overflow is null)
+            {
+                // Real physical gestures at the same visible icon, with no UIA lookup or delay between them.
+                Mouse.RightClick(rapidPoint);
+                Mouse.LeftClick(rapidPoint);
+            }
+            else
+            {
+                rapidIcon.RightClick();
+                Find().Click(); // overflow may close after the right gesture
+            }
+            dashboard = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
+            Gone(fx);
             Find().RightClick(); popup = Popup(fx);
             Assert.Equal(popup.Properties.NativeWindowHandle.Value, GetForegroundWindow());
             // Keep the same actual icon coordinate, including when its overflow flyout closes.

@@ -99,7 +99,7 @@ public class TrayPresentationTests
             tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Right);
             Assert.Null(tray.Panel);
             Assert.Equal(0, dashboards);
-            Thread.Sleep(320);
+            // A genuine left gesture immediately after right must still open Today.
             tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Left);
             tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left);
             tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left); // duplicate up is ignored
