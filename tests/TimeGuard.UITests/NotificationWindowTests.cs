@@ -19,10 +19,13 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
     [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
     [DllImport("user32.dll")] private static extern bool SetWindowPos(IntPtr hwnd, IntPtr after, int x, int y, int cx, int cy, uint flags);
     [DllImport("user32.dll")] private static extern IntPtr WindowFromPoint(System.Drawing.Point point);
+    [DllImport("user32.dll")] private static extern IntPtr GetWindowLongPtr(IntPtr hwnd, int index);
+    [DllImport("user32.dll")] private static extern IntPtr SetThreadDpiAwarenessContext(IntPtr context);
 
     [Fact]
     public void PassiveNotices_PreserveForegroundAndKeyboard_PassMouseThrough_AutoDismiss_AllKinds()
     {
+        using var pixels = new PhysicalPixelScope();
         using var fx = new PreviewFixture();
         var helper = fx.LaunchHelper(inputProbe: true);
         using var helperApp = FlaUI.Core.Application.Attach(helper.Id);
@@ -36,26 +39,37 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
         var inputPath = Path.Combine(fx.Runtime.Paths.Root, "helper-input.txt");
         if (GetForegroundWindow() != helperHwnd)
         {
-            // Windows may deny programmatic activation without recent input. Raise only our
-            // owned normal window (never topmost), verify the hit target, then activate by click.
-            Assert.True(SetWindowPos(helperHwnd, IntPtr.Zero, 0, 0, 0, 0, 0x13)); // NOACTIVATE|NOMOVE|NOSIZE
-            var area = window.BoundingRectangle;
-            var target = new System.Drawing.Point((int)(area.Left + area.Width / 2), (int)(area.Top + area.Height / 2));
-            var hit = WindowFromPoint(target);
-            var foreground = GetForegroundWindow();
-            GetWindowThreadProcessId(hit, out var hitPid);
-            GetWindowThreadProcessId(foreground, out var foregroundPid);
-            string hitName;
-            try { using var process = Process.GetProcessById((int)hitPid); hitName = process.ProcessName; }
-            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
-            { hitName = "unavailable"; }
-            output.WriteLine($"Setup helper={helperHwnd}/pid={helper.Id}; hit={hit}/pid={hitPid}/{hitName}; foreground={foreground}/pid={foregroundPid}; point={target}; bounds={area}");
-            Assert.Equal(helperHwnd, hit); // Never click an unrelated window.
-            var beforeSetup = ReadCounts(inputPath);
-            Mouse.Click(target);
-            Assert.True(SpinWait.SpinUntil(() => ReadCounts(inputPath).Clicks > Math.Max(0, beforeSetup.Clicks), TimeSpan.FromSeconds(3)),
-                "Owned helper did not receive the setup click.");
+            // Programmatic activation can be denied, and HWND_TOP need not clear a topmost
+            // foreign window. Raise only our owned helper for the verified setup click, then
+            // restore a normal window before measuring any passive notice behavior.
+            // https://learn.microsoft.com/en-us/windows/win32/api/winuser/nf-winuser-setwindowpos
+            try
+            {
+                Assert.True(SetWindowPos(helperHwnd, new IntPtr(-1), 0, 0, 0, 0, 0x13)); // TOPMOST; NOACTIVATE|NOMOVE|NOSIZE
+                var area = window.BoundingRectangle;
+                var target = new System.Drawing.Point((int)(area.Left + area.Width / 2), (int)(area.Top + area.Height / 2));
+                var hit = WindowFromPoint(target);
+                var foreground = GetForegroundWindow();
+                GetWindowThreadProcessId(hit, out var hitPid);
+                GetWindowThreadProcessId(foreground, out var foregroundPid);
+                string hitName;
+                try { using var process = Process.GetProcessById((int)hitPid); hitName = process.ProcessName; }
+                catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or System.ComponentModel.Win32Exception)
+                { hitName = "unavailable"; }
+                output.WriteLine($"Setup helper={helperHwnd}/pid={helper.Id}; hit={hit}/pid={hitPid}/{hitName}; foreground={foreground}/pid={foregroundPid}; point={target}; bounds={area}");
+                Assert.Equal(helperHwnd, hit); // Never click an unrelated window.
+                Assert.Equal((uint)helper.Id, hitPid);
+                var beforeSetup = ReadCounts(inputPath);
+                Mouse.Click(target);
+                Assert.True(SpinWait.SpinUntil(() => ReadCounts(inputPath).Clicks > Math.Max(0, beforeSetup.Clicks), TimeSpan.FromSeconds(3)),
+                    "Owned helper did not receive the setup click.");
+            }
+            finally
+            {
+                Assert.True(SetWindowPos(helperHwnd, new IntPtr(-2), 0, 0, 0, 0, 0x13)); // NOTOPMOST; restore even on setup failure
+            }
         }
+        Assert.Equal(0L, GetWindowLongPtr(helperHwnd, -20).ToInt64() & 0x8L); // Measurement target is NOT topmost.
         Assert.True(SpinWait.SpinUntil(() => GetForegroundWindow() == helperHwnd, TimeSpan.FromSeconds(5)),
             "Interactive desktop unavailable: the owned helper cannot become foreground.");
         var path = Path.Combine(fx.Runtime.Paths.Root, "notice-diagnostics.jsonl");
@@ -162,4 +176,11 @@ public class NotificationWindowTests(Xunit.Abstractions.ITestOutputHelper output
     private sealed record Sample(string Stage, DateTimeOffset AtUtc, long Hwnd, long ForegroundBefore,
         long Foreground, long Active, long Focus, bool KeyboardFocusWithin, bool MouseCaptured, int ExtendedStyles,
         string Countdown, double Width, double Height);
+
+    private sealed class PhysicalPixelScope : IDisposable
+    {
+        private readonly IntPtr _previous = SetThreadDpiAwarenessContext(new IntPtr(-4));
+        public PhysicalPixelScope() => Assert.NotEqual(IntPtr.Zero, _previous);
+        public void Dispose() => SetThreadDpiAwarenessContext(_previous);
+    }
 }

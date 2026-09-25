@@ -156,3 +156,9 @@ One-time completion steps:
 4. Inspect `screentime-dev` protections/rulesets and the inherited `@debmis` CODEOWNERS requirement. Obtain owner approval for any required ownership/protection change; do not request upstream approval as a routine handoff or bypass a required approval. Once the new workflow runs, configure its `Build and Core tests` check as required if enforcing this gate server-side. A same-account reviewer comment cannot satisfy a different-account approval rule.
 
 This is an agent operating procedure, not an automatic orchestration service. CI and GitHub protections enforce only configured checks; reviewer and implementer remain responsible for the full acceptance/review record.
+
+## Owner-authorized Beta 2 delivery
+
+D25 and the owner's 2026-09-25 Beta 2 request extend the same autonomous implementation → test → PR → independent review → remediation/re-review → CI → normal merge workflow to `codex/beta-2-ux`, based on current `screentime-dev`. The phase-number-only branch convention is superseded for this request. All existing isolation, exact-head review and merge gates apply. Review popup focus/lifetime/click-away/placement, authentication and first-run transition, AM/PM/editor round-trip/DST, legacy-field preservation, dashboard lifetime/resources and notification regressions. Serialize desktop tests and preserve live owner ScreenTime/TimeGuard processes.
+
+After code review clears, stop only for an actual necessary owner interaction gate identified by the reviewer. Prepare v0.1.0-beta.2 using the existing reproducible clean-source package workflow and independent fresh-checkout verification, including actual-package regression/UX smoke. Keep the Beta 1 draft and artifact immutable. Beta 2 release preparation is draft-only and unsigned; public publication/signing are not authorized.

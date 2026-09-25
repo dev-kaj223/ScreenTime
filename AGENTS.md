@@ -12,7 +12,7 @@ ScreenTime is a lightweight Windows, selected-app screen-time utility. Keep the 
 
 ## Working rules
 
-- Implement only the requested phase on `codex/phase-N-<topic>` from `screentime-dev`. Follow the review protocol through independent review, remediation and final validation before merging back. Do not rewrite prior phase history or push to `upstream`.
+- Implement only the requested phase on `codex/phase-N-<topic>` from `screentime-dev`; D25 authorizes `codex/beta-2-ux` for the owner-requested Beta 2 refinement. Follow the review protocol through independent review, remediation and final validation before merging back. Do not rewrite prior phase history or push to `upstream`.
 - Preserve installed TimeGuard data, startup registration and live processes. Use isolated development/test profiles and fixture-owned `ScreenTime.TestProcess` helpers. Never use name-wide/process-tree kills or real games as destructive test fixtures.
 - Core owns policy, measured accounting, persistence and exact-instance enforcement. UI/notification delivery must never grant time, own a deadline or delay enforcement. No invasive game/graphics/anti-cheat integration.
 - Keep requirements and decisions current when an approved change affects them; link to historical detail instead of copying reports. Do not promote deferred features or treat a candidate architecture file list as a mandate.

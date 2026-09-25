@@ -24,14 +24,14 @@ internal static class NoticePresentation
         return request.Kind switch
         {
             NotificationKind.GraceFinalMinute =>
-                $"{name} has less than a minute left in the current session. This session will end at {request.GraceDeadlineUtc!.Value.ToLocalTime():T}.",
+                $"{name} has less than a minute left in the current session. This session will end at {DisplayTime.Clock(request.GraceDeadlineUtc!.Value)}.",
             NotificationKind.GraceStarted =>
-                $"{name} has reached its daily limit. Finish your current session. This session will end in {minutes} minutes at {request.GraceDeadlineUtc!.Value.ToLocalTime():T}. New sessions are not allowed.",
+                $"{name} has reached its daily limit. Finish your current session. This session will end in {minutes} minutes at {DisplayTime.Clock(request.GraceDeadlineUtc!.Value)}. New sessions are not allowed.",
             NotificationKind.GraceFiveMinutes =>
-                $"{name} has 5 minutes left in the current session. This session will end at {request.GraceDeadlineUtc!.Value.ToLocalTime():T}. New sessions are not allowed.",
+                $"{name} has 5 minutes left in the current session. This session will end at {DisplayTime.Clock(request.GraceDeadlineUtc!.Value)}. New sessions are not allowed.",
             NotificationKind.Blocked when request.Reason.HasFlag(PolicyReason.Downtime) =>
                 $"{name} is unavailable during downtime." +
-                (request.NextAvailabilityUtc is { } available ? $" Next availability is {available.ToLocalTime():f}." : ""),
+                (request.NextAvailabilityUtc is { } available ? $" Next availability is {DisplayTime.Availability(available, now)}." : ""),
             NotificationKind.Blocked => $"{name} has reached its daily limit and cannot be opened again today.",
             NotificationKind.QuotaFiveMinutes => $"{name} has about 5 minutes of daily time remaining.",
             _ => $"{name} has about {minutes} minutes of daily time remaining."

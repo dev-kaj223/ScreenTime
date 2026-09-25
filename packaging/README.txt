@@ -8,9 +8,11 @@ are required. No installer, Run registration, scheduled task or updater is used.
 A normal distribution launch creates its own %APPDATA%\ScreenTime profile.
 Development builds use %APPDATA%\ScreenTime-Dev. Existing %APPDATA%\TimeGuard data
 and startup registration are not read, imported or changed. Do not configure two
-enforcers for the same app. First launch asks you to set a password. Tray status
-is read-only; Settings and Exit require that password. Closing status does not
-stop monitoring. The production settings shortcut is Ctrl+Alt+S; development
+enforcers for the same app. First launch asks you to set a password, then opens
+initial configuration. Left-click the tray icon for the read-only Dashboard.
+Right-click for temporary status; click elsewhere or press Escape to dismiss it.
+Settings and Exit require your password. Closing these views does not stop
+monitoring. The production settings shortcut is Ctrl+Alt+S; development
 uses Ctrl+Alt+Shift+S. The tray remains available if another app owns a shortcut.
 Autostart is intentionally disabled in this distribution.
 

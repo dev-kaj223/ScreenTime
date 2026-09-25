@@ -29,6 +29,8 @@ public partial class App : WpfApplication
     private SettingsAccessService? _access;
     private EventWaitHandle? _statusEvent;
     private EventWaitHandle? _exitEvent;
+    private EventWaitHandle? _dashboardEvent;
+    private UI.DashboardWindow? _dashboard;
     private TimeGuard.Models.NotificationPreferences _notificationPreferences = TimeGuard.Models.NotificationPreferences.Standard;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -82,11 +84,13 @@ public partial class App : WpfApplication
             if (_runtime.Profile == RuntimeProfile.Production && _db.GetSetting("SettingsHotkey") is null)
                 _db.SetSetting("SettingsHotkey", "Ctrl+Alt+S");
             var config = _db.LoadConfig();
+            var completedFirstRun = false;
             if (config.IsFirstRun)
             {
                 var setup = new UI.FirstRunWindow(_db);
                 if (setup.ShowDialog() != true) { Shutdown(); return; }
                 config = _db.LoadConfig();
+                completedFirstRun = true;
             }
 
             if (!StartupHelper.IsRegistered(_runtime)) StartupHelper.Register(_runtime);
@@ -101,8 +105,8 @@ public partial class App : WpfApplication
                 e.Args.Contains("--notice-diagnostics") ? WriteNoticeDiagnostic : null, () => _notificationPreferences);
             _access = new SettingsAccessService(_db.LoadPassword,
                 () => { var prompt = new UI.PasswordPromptWindow(_db); return prompt.ShowDialog() == true ? prompt.Password : null; },
-                OpenAuthorizedSettings, () => StopAndShutdownAsync(0), () => _stopping);
-            _tray = new TrayIconService(() => _monitor.Status, OpenSettings, () => _access.ExitAsync());
+                OpenAuthorizedSettings, () => StopAndShutdownAsync(0), () => _stopping, completedFirstRun);
+            _tray = new TrayIconService(() => _monitor.Status, OpenSettings, () => _access.ExitAsync(), dashboard: OpenDashboard);
 
             _power = new PowerSessionHelper(_monitor);
             _monitor.Start();
@@ -115,6 +119,7 @@ public partial class App : WpfApplication
                 _stopEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.StopEventName);
                 _statusEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.StatusEventName);
                 _exitEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.ExitEventName);
+                _dashboardEvent = new EventWaitHandle(false, EventResetMode.AutoReset, _runtime.DashboardEventName);
                 _testCommands = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
                 _testCommands.Tick += async (_, _) =>
                 {
@@ -123,6 +128,7 @@ public partial class App : WpfApplication
                         _ = Dispatcher.BeginInvoke(new Action(OpenSettings));
                     else if (!_stopping && _statusEvent.WaitOne(0)) _tray.OpenStatus();
                     else if (!_stopping && _exitEvent.WaitOne(0)) await _access.ExitAsync();
+                    else if (!_stopping && _dashboardEvent.WaitOne(0)) _tray.HandleClick(System.Windows.Forms.MouseButtons.Left);
                 };
                 _testCommands.Start();
             }
@@ -147,6 +153,7 @@ public partial class App : WpfApplication
                 }
                 catch (Exception ex) { _logger.TryWrite("Error", "HotkeyRegistrationFailed", ex); }
             }
+            if (completedFirstRun) _ = Dispatcher.BeginInvoke(new Action(_access.OpenInitialConfiguration));
         }
         catch (Exception ex)
         {
@@ -230,12 +237,47 @@ public partial class App : WpfApplication
     private void OpenAuthorizedSettings()
     {
         var before = System.Text.Json.JsonSerializer.Serialize(_db!.LoadConfig().Rules);
-        new UI.SettingsWindow(_db!, _runtime).ShowDialog();
+        new UI.SettingsWindow(_db!, _runtime, OpenDashboard).ShowDialog();
         if (_stopping) return;
         _notificationPreferences = new NotificationPreferenceStore(_runtime.Paths, _logger).Load();
         var config = _db.LoadConfig();
         // Presentation-only settings never rebase measured usage or invalidate policy facts.
         if (before != System.Text.Json.JsonSerializer.Serialize(config.Rules)) _monitor?.ReloadConfig(config);
+    }
+
+    private void OpenDashboard()
+    {
+        if (_stopping) return;
+        // Explicit navigation to the read-only Dashboard cancels protected dialogs,
+        // then lets their modal frames unwind before activating the existing window.
+        var protectedWindow = Windows.OfType<Window>().FirstOrDefault(w => w.IsVisible &&
+            w is UI.SettingsWindow or UI.PasswordPromptWindow);
+        if (protectedWindow is not null)
+        {
+            // End nested WPF modal frames explicitly, innermost first. Closing only
+            // their owner can remove their HWNDs while leaving ShowDialog on the stack.
+            var child = protectedWindow;
+            while (child.OwnedWindows.OfType<Window>().LastOrDefault(w => w.IsVisible) is { } owned)
+                child = owned;
+            if (child != protectedWindow)
+            {
+                child.Close();
+                Dispatcher.BeginInvoke(new Action(OpenDashboard));
+                return;
+            }
+            protectedWindow.Close();
+            Dispatcher.BeginInvoke(new Action(OpenDashboard));
+            return;
+        }
+        if (_dashboard is null)
+        {
+            var window = new UI.DashboardWindow(_db!, () => _monitor?.Status);
+            _dashboard = window;
+            window.Closed += (_, _) => { if (_dashboard == window) _dashboard = null; };
+            window.Show();
+        }
+        if (_dashboard.WindowState == WindowState.Minimized) _dashboard.WindowState = WindowState.Normal;
+        _dashboard.Activate();
     }
 
     protected override void OnExit(ExitEventArgs e)
@@ -258,6 +300,7 @@ public partial class App : WpfApplication
         _noticeEvent?.Dispose();
         _statusEvent?.Dispose();
         _exitEvent?.Dispose();
+        _dashboardEvent?.Dispose();
         if (_ownsMutex) _singleInstanceMutex?.ReleaseMutex();
         _singleInstanceMutex?.Dispose();
         _logger.TryWrite("Information", "ApplicationStopped");

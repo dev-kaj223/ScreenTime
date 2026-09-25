@@ -8,6 +8,7 @@
         Icon="{DynamicResource ScreenTimeBrandImage}"
         WindowStartupLocation="CenterScreen"
         Background="{StaticResource DarkBrush}">
+    <Window.Resources><local:DowntimeSummaryConverter x:Key="DowntimeSummary"/></Window.Resources>
     <Grid Margin="20">
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/>
@@ -60,9 +61,7 @@
                                 <DataGridTextColumn      Header="App Name"    Binding="{Binding DisplayName}"          Width="*"/>
                                 <DataGridTextColumn      Header="Process"     Binding="{Binding ProcessName}"          Width="110"/>
                                 <DataGridTextColumn      Header="Limit Schedule" Binding="{Binding WeeklyLimitSummary}"  Width="170"/>
-                                <DataGridTextColumn      Header="Downtime"  Binding="{Binding WeeklyWindowSummary}" Width="200"/>
-                                <DataGridTextColumn      Header="Break every" Binding="{Binding BreakEveryMinutes}"    Width="80"/>
-                                <DataGridTextColumn      Header="Break dur."  Binding="{Binding BreakDurationMinutes}" Width="75"/>
+                                <DataGridTextColumn      Header="Downtime"  Binding="{Binding BlockedPeriods, Converter={StaticResource DowntimeSummary}}" Width="200"/>
                             </DataGrid.Columns>
                         </DataGrid>
 
@@ -97,24 +96,6 @@
                         <StackPanel x:Name="RecentPanel" Grid.Row="1"/>
                     </Grid>
                 </Grid>
-            </TabItem>
-
-            <!-- Global Cap Tab -->
-            <TabItem Header="Daily Cap">
-                <StackPanel Margin="20">
-                    <TextBlock Text="Overall daily screen time cap (across all monitored apps)"
-                               Foreground="{StaticResource SubtextBrush}" FontSize="12" Margin="0,0,0,10"/>
-                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="Max minutes per day:" Foreground="{StaticResource TextBrush}" VerticalAlignment="Center" Margin="0,0,10,0"/>
-                        <TextBox x:Name="OverallCapBox"
-                                 Width="80"
-                                 Background="{StaticResource SurfaceBrush}"
-                                 Foreground="{StaticResource TextBrush}"
-                                 BorderBrush="{StaticResource AccentBrush}"
-                                 Padding="6,4"/>
-                        <TextBlock Text="(0 = no cap)" Foreground="{StaticResource SubtextBrush}" VerticalAlignment="Center" Margin="10,0,0,0"/>
-                    </StackPanel>
-                </StackPanel>
             </TabItem>
 
             <!-- Usage History Tab -->

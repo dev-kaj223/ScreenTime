@@ -11,6 +11,9 @@ Phase 7 is integrated by normal merge `cb2d6d08a519cc8fa779e14124d3588f1163cae5`
 
 Phase 8 is integrated by normal merge `0224f432b65095db4dee59522173ec0267f3e0cb` (PR #4). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/4#pullrequestreview-5318740660) cleared `6b48ac4`, closing H8/P8-G1 with approved B artwork, full author Core 218/UI 69, fresh reviewer Core 218/affected UI 6, CI and preservation evidence. The historical [Phase 8 report](PHASE8_IMPLEMENTATION.md) retains writing-time limits. A subsequent integration-CI timing assertion failure is tracked as [Phase 9 validation follow-up P9-V1](https://github.com/dev-kaj223/ScreenTime/pull/4#issuecomment-5834049344), not erased from prior history.
 
+
+Phase 9 is integrated by normal merge `2d2b6e6c6eb365a11df99b7094599f3d342a39b1` (PR #5). Its [final independent review](https://github.com/dev-kaj223/ScreenTime/pull/5#pullrequestreview-5319247623) cleared the reviewed package/reproducibility corrections. Historical phase reports retain their writing-time status and limitations.
+
 ## Product and safety boundary
 
 - Lightweight, local-only, offline-capable Windows ScreenTime-style app, in the interactive user's session. Evolve the existing .NET/WPF app rather than adding a privileged service or new framework.
@@ -86,3 +89,11 @@ The original interactive/topmost TimeGuard warning caused visible Apex disruptio
 ## Deferred unless explicitly promoted
 
 Overall multi-app caps; forced breaks; passive unrelated-app tracking; TimeGuard import; deliberate clock-tamper defense; automatic crash watchdog/restart (including Task Scheduler recovery); and broad dashboard/history redesign remain deferred. Retained legacy fields/tests do not authorize reactivating those features. Ordinary restart reconciliation, sleep/wake, midnight and persistent grace are already essential behavior, not deferred recovery features.
+
+## Beta 2: owner UX refinement
+
+D25 authorizes this bounded refinement of the accepted product. First-run password success opens initial configuration once without redundant authentication; later Settings/Exit remain protected and cancelled/wrong authentication is a no-op. Tray left click opens or activates the singleton read-only Dashboard. Tray right click toggles a temporary interactive frameless/no-taskbar status popup near the tray, bounded to the selected monitor work area. Click-away, Escape and repeated tray interaction dismiss it. Its per-app rows directly show truthful remaining/used allowance, downtime end and relative availability, or original grace countdown/deadline with new-session denial; unknown availability stays unknown. Footer: Dashboard, Settings, Exit. Closing views never stops monitoring.
+
+Use h:mm AM/PM for visible schedule, deadline and availability times. Daily-limit hours/minutes convert and round-trip to integer minutes, with 0h0m Unlimited. Downtime supports multi-weekday selection, separate hour/minute/AM-PM controls, explicit next-day periods and clean configured rows. Preserve normalized data, week boundaries, overlap/adjacency, half-open intervals and DST behavior. Remove deferred forced-break/aggregate-cap UI while retaining compatible stored fields.
+
+Dashboard shows Today per configured enabled app (used, remaining, state, next downtime/availability), followed by an intentional empty state or an improved visualization of existing last-seven-day usage. It remains read-only with no analytics subsystem, aggregate policy or passive unrelated-app tracking. Preserve neutral dark surfaces, restrained accents and approved filled-base branding. Reviewer assesses any necessary packaged owner UX/Apex gate after exact-head code review; automation must exercise actual popup activation/dismissal, lifecycle, protected commands, editor save/reload and prior Core/UI regressions.

@@ -1,7 +1,26 @@
 [CmdletBinding()]
-param([Parameter(Mandatory)][string]$Package)
+param(
+    [Parameter(Mandatory)][string]$Package,
+    [int]$ActiveProductionProcessId,
+    [long]$ActiveProductionStartUtcTicks
+)
 $ErrorActionPreference = 'Stop'
 Set-StrictMode -Version Latest
+$activeProduction = $PSBoundParameters.ContainsKey('ActiveProductionProcessId')
+if ($activeProduction -ne $PSBoundParameters.ContainsKey('ActiveProductionStartUtcTicks')) {
+    throw 'Active production verification requires both expected process ID and start UTC ticks.'
+}
+$ownerProcess = $null
+try {
+if ($activeProduction) {
+    if ($ActiveProductionProcessId -le 0 -or $ActiveProductionStartUtcTicks -le 0) { throw 'Invalid active production identity.' }
+    $ownerProcess = [Diagnostics.Process]::GetProcessById($ActiveProductionProcessId)
+    $null = $ownerProcess.Handle # Retain this exact instance; never stop or modify it.
+    if ($ownerProcess.HasExited -or $ownerProcess.ProcessName -cne 'ScreenTime' -or
+        $ownerProcess.StartTime.ToUniversalTime().Ticks -ne $ActiveProductionStartUtcTicks) {
+        throw 'Active production process does not match the expected ScreenTime instance.'
+    }
+}
 $root = Split-Path $PSScriptRoot -Parent
 $zip = (Resolve-Path -LiteralPath $Package).Path
 $expected = ((Get-Content -Raw -LiteralPath "$zip.sha256") -split '\s+')[0]
@@ -40,10 +59,22 @@ function Probe([string[]]$Arguments) {
 }
 function UserState {
     @('ScreenTime','ScreenTime-Dev','TimeGuard') | ForEach-Object {
+        # The explicitly identified owner instance can legitimately write/lock only
+        # this production profile. Never claim its live bytes are unchanged.
+        if ($activeProduction -and $_ -eq 'ScreenTime') { return }
         $path=Join-Path ([Environment]::GetFolderPath('ApplicationData')) $_
         if(Test-Path -LiteralPath $path) {
             "directory:$path"
             Get-ChildItem -LiteralPath $path -File -Recurse | Sort-Object FullName | ForEach-Object { "$($_.FullName)|$((Get-FileHash -LiteralPath $_.FullName -Algorithm SHA256).Hash)" }
+        }
+    }
+    $runPath = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+    if (-not (Test-Path -LiteralPath $runPath)) { 'startup-key:absent' }
+    else {
+        $runKey = Get-Item -LiteralPath $runPath
+        'startup-key:present'
+        foreach ($name in @($runKey.GetValueNames() | Sort-Object)) {
+            [ordered]@{ Name=$name; Kind=$runKey.GetValueKind($name).ToString(); Value=$runKey.GetValue($name) } | ConvertTo-Json -Compress
         }
     }
 }
@@ -69,6 +100,22 @@ try {
     Move-Item -LiteralPath $native -Destination $disabled
     $failedNative=Probe @('--describe-runtime')
     if($failedNative.ExitCode -eq 0 -or -not $failedNative.Error){throw 'Missing native dependency must fail diagnostically.'}
+    $failedNativeTest=Probe @('--describe-runtime','--test-profile',$testRoot)
+    if($failedNativeTest.ExitCode -eq 0 -or -not $failedNativeTest.Error -or (Test-Path -LiteralPath $testRoot)) {
+        throw 'Missing native dependency must fail without creating the isolated profile.'
+    }
 } finally {if(Test-Path -LiteralPath $disabled){Move-Item -LiteralPath $disabled -Destination $native}}
 if((@($beforeState) -join "`n") -cne (@(UserState) -join "`n")){throw 'A diagnostic probe modified a user profile.'}
-[pscustomobject]@{ArchiveSha256=$expected;Extracted=$extract;Description=$description;Files=$actual.Count;LegacyRejected=$true}|ConvertTo-Json -Depth 6
+if ($activeProduction) {
+    $ownerProcess.Refresh()
+    if ($ownerProcess.HasExited -or $ownerProcess.StartTime.ToUniversalTime().Ticks -ne $ActiveProductionStartUtcTicks) {
+        throw 'Expected active production instance did not survive verification.'
+    }
+}
+[pscustomobject]@{
+    ArchiveSha256=$expected; Extracted=$extract; Description=$description; Files=$actual.Count; LegacyRejected=$true
+    ProductionProfileBytes= $(if ($activeProduction) { 'NotComparedActiveOwner' } else { 'Unchanged' })
+    LegacyAndDevelopmentProfiles='Unchanged'; StartupValues='Unchanged'
+    ActiveProductionIdentity= $(if ($activeProduction) { [ordered]@{ ProcessId=$ActiveProductionProcessId; StartUtcTicks=$ActiveProductionStartUtcTicks; Survived=$true } } else { $null })
+}|ConvertTo-Json -Depth 6
+} finally { if ($null -ne $ownerProcess) { $ownerProcess.Dispose() } }

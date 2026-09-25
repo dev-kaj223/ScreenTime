@@ -104,7 +104,7 @@ public class NoticePresentationTests
                     { DisplayName = name, NextAvailabilityUtc = DateTimeOffset.UtcNow.AddDays(1) };
                 Assert.Equal(heading, NoticePresentation.Style(request).Heading);
                 var body = NoticePresentation.Body(request, request.CreatedAtUtc);
-                Assert.Equal(string.Format(template, name, request.GraceDeadlineUtc!.Value.ToLocalTime().ToString("T")), body);
+                Assert.Equal(string.Format(template, name, DisplayTime.Clock(request.GraceDeadlineUtc!.Value)), body);
                 Assert.DoesNotContain(name + ":", body);
                 Assert.DoesNotContain("game", body);
                 Assert.NotEqual(body.ToUpperInvariant(), body);
@@ -125,7 +125,7 @@ public class NoticePresentationTests
         };
         Assert.Equal("APP BLOCKED", NoticePresentation.Style(request).Heading);
         Assert.Equal("Example Editor is unavailable during downtime." +
-            (knownAvailability ? $" Next availability is {request.NextAvailabilityUtc!.Value.ToLocalTime():f}." : ""),
+            (knownAvailability ? $" Next availability is {DisplayTime.Availability(request.NextAvailabilityUtc!.Value, request.CreatedAtUtc)}." : ""),
             NoticePresentation.Body(request, request.CreatedAtUtc));
     }
 
