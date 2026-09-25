@@ -4,6 +4,7 @@
     <TargetFramework>net8.0-windows</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <!-- UI automation tests must run single-threaded on the STA thread -->
@@ -11,6 +12,7 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Using Include="System.IO" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
     <PackageReference Include="xunit" Version="2.6.2" />
     <PackageReference Include="xunit.runner.visualstudio" Version="2.5.4">
@@ -27,7 +29,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\TimeGuard.Core\TimeGuard.Core.csproj" />
-    <ProjectReference Include="..\..\src\TimeGuard.App\TimeGuard.App.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\..\src\TimeGuard.App\TimeGuard.App.csproj" />
     <ProjectReference Include="..\ScreenTime.TestProcess\ScreenTime.TestProcess.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 

@@ -38,15 +38,16 @@ public class DatabaseMigrator
         using var versionCommand = conn.CreateCommand();
         versionCommand.CommandText = "PRAGMA user_version";
         var version = Convert.ToInt32(versionCommand.ExecuteScalar());
-        if (version > 3) throw new InvalidOperationException($"Unsupported database schema version {version}.");
-        if (version == 3) return;
+        if (version > 4) throw new InvalidOperationException($"Unsupported database schema version {version}.");
+        if (version == 4) return;
         // Preserve a consistent pre-upgrade copy of existing ScreenTime profile data.
         using var tablesCommand = conn.CreateCommand();
         tablesCommand.CommandText = "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='AppRules'";
         if (Convert.ToInt32(tablesCommand.ExecuteScalar()) > 0 && conn.DataSource != ":memory:")
         {
-            foreach (var suffix in version == 0 ? new[] { ".pre-phase2.bak", ".pre-phase3.bak", ".pre-phase4.bak" }
-                : version == 1 ? new[] { ".pre-phase3.bak", ".pre-phase4.bak" } : new[] { ".pre-phase4.bak" })
+            foreach (var suffix in (version == 0 ? new[] { ".pre-phase2.bak", ".pre-phase3.bak", ".pre-phase4.bak" }
+                : version == 1 ? new[] { ".pre-phase3.bak", ".pre-phase4.bak" }
+                : version == 2 ? new[] { ".pre-phase4.bak" } : Array.Empty<string>()).Append(".pre-phase5.bak"))
             {
                 var backupPath = conn.DataSource + suffix;
                 if (!File.Exists(backupPath))
@@ -153,7 +154,16 @@ public class DatabaseMigrator
             """);
         }
         if (version < 2) ApplyPhase3(conn, tx);
-        ApplyPhase4(conn, tx);
+        if (version < 3) ApplyPhase4(conn, tx);
+        Execute(conn, tx, """
+            CREATE TABLE NotificationReceipts (
+                ReceiptKey TEXT PRIMARY KEY NOT NULL,
+                AppKey TEXT NOT NULL,
+                Kind INTEGER NOT NULL CHECK(Kind BETWEEN 0 AND 4),
+                RequestedAtUtcTicks INTEGER NOT NULL CHECK(RequestedAtUtcTicks>0)
+            );
+            PRAGMA user_version=4;
+            """);
         tx.Commit();
     }
 

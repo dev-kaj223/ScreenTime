@@ -25,6 +25,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     private bool _cancellationDisposed;
     private AppRule[] _rulesConfig;
     private AppRule[]? _pendingConfig;
+    private long _configurationRevision;
     private DailyLog _log;
     private IReadOnlyList<GraceEpisode> _grace;
     internal TimeSpan GraceDurationForTesting { get; init; } = GraceEpisode.DefaultDuration;
@@ -32,6 +33,30 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     private readonly Dictionary<string, int> _sessions = new();
     private IReadOnlyList<PolicyDecision> _decisions = Array.Empty<PolicyDecision>();
     private IReadOnlyList<TerminationResult> _enforcementResults = Array.Empty<TerminationResult>();
+    private readonly NotificationOutbox _notices;
+    internal Task NotificationWorkForTesting => _notices.Completion;
+    private readonly HashSet<string> _noticeAttempts = [];
+    private readonly Dictionary<string, DateTimeOffset> _blockedNotices = [];
+    private IReadOnlyList<NotificationRequest> _notificationFacts = Array.Empty<NotificationRequest>();
+    public IReadOnlyList<NotificationRequest> NotificationFacts => Volatile.Read(ref _notificationFacts);
+
+    // Pull-only bounded mailbox: the enforcement worker never invokes presentation code.
+    public bool TryReadNotification(out NotificationRequest? request)
+    {
+        while (_notices.TryRead(out var next))
+        {
+            if (next is null || !IsNotificationCurrent(next)) continue;
+            request = next;
+            return true;
+        }
+        request = null;
+        return false;
+    }
+
+    public bool IsNotificationCurrent(NotificationRequest request) =>
+        Volatile.Read(ref _pendingConfig) is null && request.ConfigurationRevision == Interlocked.Read(ref _configurationRevision) &&
+        NotificationPolicy.IsCurrent(request, Decisions.FirstOrDefault(d => d.AppKey == request.AppKey), _time.GetUtcNow()) &&
+        (request.Kind == NotificationKind.Blocked || NotificationFacts.Any(n => n.ReceiptKey == request.ReceiptKey));
 
     public Task Completion { get { lock (_lifecycleGate) return _worker ?? Task.CompletedTask; } }
     public Exception? LastFault { get; private set; }
@@ -57,6 +82,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         StoppingToken = _cts.Token;
         _log = db.LoadLog(DateOnly.FromDateTime(_time.GetLocalNow().DateTime));
         _grace = db.LoadGraceEpisodes();
+        _notices = new NotificationOutbox(db, IsNotificationCurrent, logger);
     }
 
     private static AppRule[] CopyRules(AppConfig config)
@@ -139,6 +165,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         }
         finally
         {
+            await _notices.StopAsync().ConfigureAwait(false);
             lock (_lifecycleGate)
             {
                 if (!_cancellationDisposed) _cts.Dispose();
@@ -181,7 +208,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 _accounting = new UsageAccounting(_time, _downtime);
             }
             var pending = Interlocked.Exchange(ref _pendingConfig, null);
-            if (pending is not null) { _rulesConfig = pending; _accounting.Reset(); }
+            if (pending is not null) { Interlocked.Increment(ref _configurationRevision); _rulesConfig = pending; _accounting.Reset(); }
             var configured = _rulesConfig.Where(r => r.Enabled).ToArray();
             var keys = configured.Select(r => r.ProcessName).ToHashSet(StringComparer.Ordinal);
             var instances = _processes.Snapshot(keys).Where(p => keys.Contains(p.AppKey)).Distinct().ToArray();
@@ -283,7 +310,11 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
                 _accounting.Forget(result.Target);
             var next = _downtime.MidnightAfter(now);
             foreach (var episode in _grace.Where(e => e.Phase == GracePhase.Active))
+            {
                 if (episode.ExpiresAtUtc < next) next = episode.ExpiresAtUtc;
+                var finalMinute = episode.ExpiresAtUtc.AddSeconds(-60);
+                if (finalMinute > now && finalMinute < next) next = finalMinute;
+            }
             foreach (var decision in decisions)
             {
                 foreach (var boundary in new[] { decision.DowntimeEnd, decision.NextDowntimeStart })
@@ -297,6 +328,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
             }
             var delay = next - _time.GetUtcNow();
             _nextWait = delay < TimeSpan.FromMilliseconds(100) ? TimeSpan.FromMilliseconds(100) : delay < PollInterval ? delay : PollInterval;
+            PublishNotifications(decisions, instanceDecisions, running, today, now);
             // All targets are enforced before any UI subscriber is invoked. WPF enqueues
             // asynchronously; subscriber exceptions are diagnostics, never worker failures.
             foreach (var decision in decisions)
@@ -306,6 +338,41 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
             }
         }
         finally { _tickGate.Release(); }
+    }
+
+    private void PublishNotifications(IReadOnlyList<PolicyDecision> decisions,
+        IReadOnlyList<(PolicyDecision Decision, ProcessInstance Instance)> instances,
+        HashSet<string> running, DateOnly today, DateTimeOffset now)
+    {
+        var facts = new List<NotificationRequest>();
+        var revision = Interlocked.Read(ref _configurationRevision);
+        foreach (var decision in decisions)
+        {
+            var rule = _rulesConfig.First(r => r.ProcessName == decision.AppKey);
+            var remaining = rule.GetScheduleForDay(today.DayOfWeek).DailyLimitMinutes * 60L -
+                (_log.Entries.FirstOrDefault(e => e.ProcessName == decision.AppKey)?.QuotaSeconds ?? 0);
+            var candidate = rule.Enabled ? NotificationPolicy.Evaluate(decision, today, remaining,
+                running.Contains(decision.AppKey), now) : null;
+            if (candidate is not null) facts.Add(candidate with { ConfigurationRevision = revision });
+            // A grace milestone takes priority over the optional relaunch-blocked notice.
+            if (candidate is null && instances.Any(i => i.Instance.AppKey == decision.AppKey && i.Decision.TerminationRequired) &&
+                (!_blockedNotices.TryGetValue(decision.AppKey, out var last) || now - last >= TimeSpan.FromSeconds(30)))
+            {
+                _blockedNotices[decision.AppKey] = now;
+                _notices.Queue(new($"blocked:{decision.AppKey}:{now.UtcTicks}", decision.AppKey,
+                    decision.DisplayName, NotificationKind.Blocked, now, now.AddSeconds(15), TimeSpan.Zero,
+                    Reason: decision.PrimaryReason, ConfigurationRevision: revision, NextAvailabilityUtc: decision.NextAvailability));
+            }
+        }
+        Volatile.Write(ref _notificationFacts, facts.AsReadOnly());
+        // Keep runtime failures deduplicated while the candidate is current. Durable receipts
+        // retain date/episode history across restart and configuration changes.
+        _noticeAttempts.IntersectWith(facts.Select(n => n.ReceiptKey));
+        foreach (var request in facts)
+        {
+            if (!_noticeAttempts.Add(request.ReceiptKey)) continue;
+            _notices.Queue(request);
+        }
     }
 
     private void Notify(Action<string, string>? handlers, PolicyDecision decision)

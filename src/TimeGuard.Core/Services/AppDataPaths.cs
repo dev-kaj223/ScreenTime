@@ -5,6 +5,7 @@ public sealed class AppDataPaths
 {
     public string Root { get; }
     public string DatabasePath { get; }
+    public string NotificationDatabasePath => DatabasePath + ".notifications.db";
     public string LogsDirectory => Path.Combine(Root, "logs");
     public string LogPath => Path.Combine(LogsDirectory, "diagnostics.jsonl");
     public string RuntimeDirectory => Path.Combine(Root, "runtime");

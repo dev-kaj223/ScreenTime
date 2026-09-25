@@ -312,7 +312,7 @@ Enforcement always follows persisted policy, regardless of display/suppression/f
 |---|---|---|
 | 10 minutes remaining | Passive early warning with app name and remaining time. | App/quota date/10-minute milestone. |
 | 5 minutes remaining | Stronger wording/color, still passive and brief. | App/quota date/5-minute milestone. |
-| Quota exhausted and valid existing session | “Daily limit reached. Finish your current game. ScreenTime will close it in 20 minutes.” | Grace episode/start. Show actual remaining time after restart. During overlapping downtime, keep the original stop time and explain that new launches are blocked. |
+| Quota exhausted and valid existing session | “{DisplayName} has reached its daily limit. Finish your current session. This session will end in {N} minutes at {deadline}. New sessions are not allowed.” | Grace episode/start. Show actual remaining time after restart. During overlapping downtime, keep the original stop time and explain that new launches are blocked. See the [approved Phase 5 copy](PHASE5_IMPLEMENTATION.md#tests-and-current-evidence). |
 | 5 minutes of grace remaining | Final warning with actual stop time. | Grace episode/final milestone. |
 | Grace expired | Terminate verified instances; optionally show one passive confirmation. | Episode completion; no extra acknowledgement or grace. |
 
