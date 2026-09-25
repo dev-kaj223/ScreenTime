@@ -21,6 +21,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     private readonly SemaphoreSlim _tickGate = new(1, 1);
     private readonly IAppLogger? _logger;
     private Task? _worker;
+    private Task? _shutdown;
     private bool _stopped;
     private bool _cancellationDisposed;
     private AppRule[] _rulesConfig;
@@ -149,15 +150,20 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         }
     }
 
-    public async Task StopAsync()
+    public Task StopAsync()
     {
-        Task worker;
         lock (_lifecycleGate)
         {
+            if (_shutdown is not null) return _shutdown;
             _stopped = true;
             if (!_cancellationDisposed) _cts.Cancel();
-            worker = _worker ?? Task.CompletedTask;
+            // Always schedule cleanup after publishing this shared task, even when no worker exists.
+            return _shutdown = Task.Run(() => FinishStopAsync(_worker ?? Task.CompletedTask));
         }
+    }
+
+    private async Task FinishStopAsync(Task worker)
+    {
         try
         {
             await worker.ConfigureAwait(false);
@@ -179,14 +185,28 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
     // UI callers only publish a private copy; no usage/session state is touched here.
     public void ReloadConfig(AppConfig config)
     {
-        Interlocked.Exchange(ref _pendingConfig, CopyRules(config));
-        Wake();
+        lock (_lifecycleGate)
+        {
+            if (_stopped) return;
+            Interlocked.Exchange(ref _pendingConfig, CopyRules(config));
+            Wake();
+        }
     }
 
     // Power callbacks publish signals only; the coordinator owns all accounting state.
-    public void NotifySuspend() { Interlocked.Exchange(ref _suspended, 1); Interlocked.Exchange(ref _rebase, 1); Wake(); }
-    public void NotifyResume() { Interlocked.Exchange(ref _rebase, 1); Interlocked.Exchange(ref _suspended, 0); Wake(); }
-    public void NotifyTimeChanged() { Interlocked.Exchange(ref _rebase, 1); Wake(); }
+    public void NotifySuspend() => PublishPowerSignal(1);
+    public void NotifyResume() => PublishPowerSignal(0);
+    public void NotifyTimeChanged() => PublishPowerSignal(null);
+    private void PublishPowerSignal(int? suspended)
+    {
+        lock (_lifecycleGate)
+        {
+            if (_stopped) return;
+            if (suspended is not null) Interlocked.Exchange(ref _suspended, suspended.Value);
+            Interlocked.Exchange(ref _rebase, 1);
+            Wake();
+        }
+    }
     private void Wake() { if (_wake.CurrentCount == 0) { try { _wake.Release(); } catch (SemaphoreFullException) { } } }
 
     private async Task RunLoop(CancellationToken ct)
@@ -204,6 +224,7 @@ public sealed class MonitorService : IDisposable, IAsyncDisposable
         await _tickGate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
+            lock (_lifecycleGate) { if (_stopped) return; }
             if (!_downtime.Zone.HasSameRules(_time.LocalTimeZone) || _downtime.Zone.Id != _time.LocalTimeZone.Id)
             {
                 _downtime = new DowntimeEvaluator(_time.LocalTimeZone);

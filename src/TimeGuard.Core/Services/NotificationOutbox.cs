@@ -39,13 +39,20 @@ internal sealed class NotificationOutbox(IStateStore store, Func<NotificationReq
             {
                 // Live final-minute state may resume after restart; it has no durable delivery receipt or per-second writes.
                 if (current(request) && (request.Kind is NotificationKind.Blocked or NotificationKind.GraceFinalMinute || store.TryRecordNotification(request)) && current(request))
-                    _ready.Writer.TryWrite(request);
+                    lock (_gate) { if (!_stopping) _ready.Writer.TryWrite(request); }
             }
             catch (Exception ex) { logger.TryWrite("Error", "NotificationReceiptFailed", ex); }
         }
     }
     internal Task StopAsync()
     {
-        lock (_gate) { _stopping = true; _pending.Clear(); return _worker ?? Task.CompletedTask; }
+        lock (_gate)
+        {
+            _stopping = true;
+            _pending.Clear();
+            _ready.Writer.TryComplete();
+            while (_ready.Reader.TryRead(out _)) { }
+            return _worker ?? Task.CompletedTask;
+        }
     }
 }

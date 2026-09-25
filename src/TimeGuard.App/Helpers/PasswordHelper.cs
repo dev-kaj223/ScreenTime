@@ -28,7 +28,15 @@ public static class PasswordHelper
 
     public static bool Verify(string password, string storedHash, string storedSalt)
     {
-        var saltBytes = Convert.FromBase64String(storedSalt);
+        byte[] saltBytes, expected;
+        try
+        {
+            saltBytes = Convert.FromBase64String(storedSalt);
+            expected = Convert.FromBase64String(storedHash);
+        }
+        catch (FormatException) { return false; }
+        // Damaged credentials fail closed without resetting or replacing the password.
+        if (saltBytes.Length != SaltBytes || expected.Length != HashBytes) return false;
         var hashBytes = Rfc2898DeriveBytes.Pbkdf2(
             Encoding.UTF8.GetBytes(password),
             saltBytes,
@@ -38,6 +46,6 @@ public static class PasswordHelper
 
         return CryptographicOperations.FixedTimeEquals(
             hashBytes,
-            Convert.FromBase64String(storedHash));
+            expected);
     }
 }

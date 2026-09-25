@@ -8,6 +8,39 @@ namespace TimeGuard.Tests;
 
 public class MonitorLifecycleTests
 {
+    [Fact]
+    public async Task OverlappingStops_JoinOneCleanup_LateSignalsAndTicksCannotRestartWork()
+    {
+        using var profile = new TempProfile(); var db = new DatabaseService(profile.Runtime.Paths);
+        using var entered = new ManualResetEventSlim(); using var release = new ManualResetEventSlim();
+        var calls = 0;
+        var config = new AppConfig { Rules = [new() { ProcessName = "helper" }] };
+        var monitor = CreateMonitor(db, new(), config, snapshot: () =>
+        { Interlocked.Increment(ref calls); entered.Set(); release.Wait(TimeSpan.FromSeconds(10)); return new() { ["helper"] = "" }; });
+        monitor.Start();
+        Assert.True(entered.Wait(TimeSpan.FromSeconds(5)));
+        try
+        {
+            var first = monitor.StopAsync();
+            var stops = await Task.WhenAll(Enumerable.Range(0, 40).Select(_ => Task.Run(() =>
+            {
+                monitor.ReloadConfig(config); monitor.NotifySuspend(); monitor.NotifyResume(); monitor.NotifyTimeChanged();
+                monitor.Dispose(); return new[] { monitor.StopAsync() };
+            })));
+            Assert.All(stops, stop => Assert.Same(first, stop.Single()));
+            Assert.False(first.IsCompleted);
+            release.Set(); await first.WaitAsync(TimeSpan.FromSeconds(5));
+            await monitor.TickAsync(); await monitor.DisposeAsync();
+            Assert.Equal(1, calls);
+            using var connection = new SqliteConnection($"Data Source={profile.Runtime.Paths.DatabasePath}"); connection.Open();
+            using var check = connection.CreateCommand();
+            check.CommandText = "SELECT count(*) FROM Sessions"; Assert.Equal(1L, check.ExecuteScalar());
+            check.CommandText = "SELECT count(*) FROM Sessions WHERE EndTime IS NULL"; Assert.Equal(0L, check.ExecuteScalar());
+            Assert.Throws<ObjectDisposedException>(monitor.Start);
+        }
+        finally { release.Set(); await monitor.StopAsync(); }
+    }
+
     private static MonitorService CreateMonitor(DatabaseService db, RulesEngine rules, AppConfig config,
         IAppLogger? logger = null, Func<Dictionary<string, string>>? snapshot = null) =>
         new(db, rules, config, logger,

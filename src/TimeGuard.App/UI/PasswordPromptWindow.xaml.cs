@@ -24,8 +24,7 @@ public partial class PasswordPromptWindow : Window
 
     private void Verify()
     {
-        var hash = _db.GetSetting("PasswordHash") ?? string.Empty;
-        var salt = _db.GetSetting("PasswordSalt") ?? string.Empty;
+        var (hash, salt) = _db.LoadPassword();
         if (PasswordHelper.Verify(PasswordBox.Password, hash, salt))
         {
             DialogResult = true;

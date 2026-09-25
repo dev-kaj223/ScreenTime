@@ -4,6 +4,8 @@ This is the current product contract distilled from the approved [architecture](
 
 Phases 1–5 are approved and integrated through `378f9fbf245193089ce55271a10e7c0079a5c882` (PR #1). The [final independent Phase 5 review](https://github.com/dev-kaj223/ScreenTime/pull/1#pullrequestreview-5312587369) clears `476bb76`. Historical reports retain their original validation limits and writing-time status; current source/tests establish actual behavior. Upstream TimeGuard README features are not the ScreenTime contract.
 
+Phase 6 is integrated by normal merge `899ed1344137472bed5dcf1e5e871504b2e719b0` (PR #2). The [final independent Phase 6 review](https://github.com/dev-kaj223/ScreenTime/pull/2#pullrequestreview-5313944356) cleared `4951d1a` with 204 Core tests, 58 UI tests, successful CI and preservation checks, and no additional manual gate. Its fresh native probe cleared the implementation-side foreground-precondition limitation; the historical [Phase 6 report](PHASE6_IMPLEMENTATION.md) remains unchanged.
+
 ## Product and safety boundary
 
 - Lightweight, local-only, offline-capable Windows ScreenTime-style app, in the interactive user's session. Evolve the existing .NET/WPF app rather than adding a privileged service or new framework.
@@ -55,6 +57,13 @@ The original interactive/topmost TimeGuard warning caused visible Apex disruptio
 - Closing a panel does not stop enforcement. Status consumes policy snapshots; it does not own enforcement state. Expanded history/dashboard or multi-app selection UX is not a prerequisite.
 - Add protected notification preferences with Standard / Minimal / Custom presets, per-milestone enable/disable controls, configurable final-countdown visibility/duration, default urgency colors and optional owner-selected Info/Warning/Critical colors with reset-to-default. Countdown duration stays within the approved final-minute maximum. Preferences never weaken enforcement or change quota/grace timing. This is approved Phase 6 scope; its settings UI is not part of Phase 5.
 - Standard preserves all existing notices, the 60-second countdown and default colors. Minimal retains grace-start, final countdown and blocked/expired notices; Custom allows each milestone separately. Preview uses example display facts only. Preference storage and UI delivery cannot hold the policy writer lock or rebase accounting. No unconditional Apex rerun is required for Phase 6: independent review determines whether actual rendering changes justify a new game gate; unresolved explicit physical UX gates remain blocking.
+
+## Phase 7: reliability and failure behavior
+
+- Harden lifecycle, persistence integrity, contention handling, shutdown, restart reconciliation, diagnostics and resource cleanup within the existing architecture. Preserve original deadlines, exact identity and commit-before-enforcement.
+- Configuration and credential pairs must not be partially published by a failed write or mixed across concurrent reads. Corrupt or unsupported databases must remain intact for diagnosis; never silently reset them or fall back to installed TimeGuard.
+- Persistent storage failure retains the supervised nonzero failure path. Bounded SQLite busy waits do not authorize an uncommitted grace grant, an uncommitted expiry kill, a replacement deadline, an automatic watchdog or a new strict fail-safe mode.
+- Test realistic faults and lifecycle races in disposable profiles. Report the actual duration, configuration and measurements for resource checks; an accelerated stress test is not evidence of multi-day stability or an unmeasured performance budget.
 
 ## Deferred unless explicitly promoted
 
