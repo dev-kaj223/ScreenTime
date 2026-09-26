@@ -46,7 +46,7 @@ public class Beta2PopupTests(Xunit.Abstractions.ITestOutputHelper output)
         using var dpi = new PhysicalPixelScope();
         using var fx = new Fixture();
         Signal(fx.Runtime.DashboardEventName);
-        var dashboard = fx.App.WaitForWindow(fx.Automation, "Usage Dashboard");
+        var dashboard = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
         dashboard.SetForeground();
         Signal(fx.Runtime.StatusEventName);
         var popup = Popup(fx);
@@ -55,12 +55,21 @@ public class Beta2PopupTests(Xunit.Abstractions.ITestOutputHelper output)
         Assert.Equal(0L, GetWindowLongPtr(hwnd, -16).ToInt64() & 0x00C00000L); // No caption.
         Assert.Equal(0L, GetWindowLongPtr(hwnd, -20).ToInt64() & 0x00040000L); // No taskbar APPWINDOW.
         ClickOwned(fx, popup, popup.FindButton("Dashboard")); Gone(fx);
-        Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title.Contains("Usage Dashboard")));
+        Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title.Contains("ScreenTime — Main")));
         Signal(fx.Runtime.StatusEventName); popup = Popup(fx);
         ClickOwned(fx, popup, popup.FindButton("Settings")); Gone(fx);
         var prompt = fx.App.WaitForWindow(fx.Automation, "Protected Access");
         prompt.Close();
         Assert.False(fx.App.HasExited);
+        Assert.NotNull(dashboard.FindButton("Settings 🔒"));
+        Signal(fx.Runtime.StatusEventName); popup = Popup(fx);
+        ClickOwned(fx, popup, popup.FindButton("Settings")); Gone(fx);
+        prompt = fx.App.WaitForWindow(fx.Automation, "Protected Access");
+        ClickOwned(fx, prompt, prompt.FindFirstDescendant(cf => cf.ByAutomationId("PasswordBox")));
+        Keyboard.Type(AppFixture.TestPassword); prompt.FindButton("Unlock").Invoke();
+        Assert.NotNull(dashboard.FindButton("Settings 🔓"));
+        Assert.NotNull(dashboard.FindButton("➕ Add Rule"));
+        dashboard.FindButton("Usage").Invoke();
         Signal(fx.Runtime.StatusEventName); popup = Popup(fx);
         ClickOwned(fx, popup, popup.FindButton("Exit")); Gone(fx);
         prompt = fx.App.WaitForWindow(fx.Automation, "Protected Access");
@@ -125,11 +134,32 @@ public class Beta2PopupTests(Xunit.Abstractions.ITestOutputHelper output)
         }
         try
         {
-            Find().Click();
-            var dashboard = fx.App.WaitForWindow(fx.Automation, "Usage Dashboard");
-            Find().Click(); Thread.Sleep(250);
-            Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title.Contains("Usage Dashboard")));
             Find().RightClick(); var popup = Popup(fx);
+            Assert.Empty(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title == "ScreenTime — Main"));
+            Find().RightClick(); Gone(fx);
+            Find().Click();
+            var dashboard = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
+            Find().Click(); Thread.Sleep(250);
+            Assert.Single(fx.App.GetAllTopLevelWindows(fx.Automation).Where(w => w.Title.Contains("ScreenTime — Main")));
+            dashboard.Close();
+            var rapidIcon = Find();
+            var rapidBounds = rapidIcon.BoundingRectangle;
+            var rapidPoint = new System.Drawing.Point(rapidBounds.Left + rapidBounds.Width / 2,
+                rapidBounds.Top + rapidBounds.Height / 2);
+            if (overflow is null)
+            {
+                // Real physical gestures at the same visible icon, with no UIA lookup or delay between them.
+                Mouse.RightClick(rapidPoint);
+                Mouse.LeftClick(rapidPoint);
+            }
+            else
+            {
+                rapidIcon.RightClick();
+                Find().Click(); // overflow may close after the right gesture
+            }
+            dashboard = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
+            Gone(fx);
+            Find().RightClick(); popup = Popup(fx);
             Assert.Equal(popup.Properties.NativeWindowHandle.Value, GetForegroundWindow());
             // Keep the same actual icon coordinate, including when its overflow flyout closes.
             Find().RightClick(); Gone(fx);

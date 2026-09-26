@@ -100,6 +100,12 @@ public class TrayStatusTests(Xunit.Abstractions.ITestOutputHelper output)
             Assert.False(fx.App.HasExited);
             prompt.Close();
             Assert.Equal(config, System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig()));
+            if (signal == fx.Runtime.SettingsEventName)
+            {
+                var main = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
+                Assert.NotNull(main.FindButton("Settings 🔒"));
+                Assert.NotNull(main.FindTextContaining("Last 7 Days"));
+            }
         }
         Signal(fx.Runtime.ExitEventName);
         EnterPassword(fx.App.WaitForWindow(fx.Automation, "Protected Access"), AppFixture.TestPassword);
@@ -112,7 +118,7 @@ public class TrayStatusTests(Xunit.Abstractions.ITestOutputHelper output)
         using var fx = new SeededAppFixture();
         var before = System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig());
         fx.RequestSettings(); EnterPassword(fx.App.WaitForWindow(fx.Automation, "Protected Access"), AppFixture.TestPassword);
-        var settings = fx.App.WaitForWindow(fx.Automation, "ScreenTime Settings");
+        var settings = fx.App.WaitForWindow(fx.Automation, "ScreenTime — Main");
         settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(ControlType.TabItem))).AsTabItem().Select();
         settings.FindFirstDescendant(cf => cf.ByAutomationId("PresetBox")).AsComboBox().Select("Minimal");
         settings.FindButton("Preview").Invoke();
@@ -124,8 +130,8 @@ public class TrayStatusTests(Xunit.Abstractions.ITestOutputHelper output)
         var store = new NotificationPreferenceStore(fx.Runtime.Paths);
         Assert.Equal(NotificationPreferences.Minimal, store.Load());
         Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(fx.OpenDatabase().LoadConfig()));
-        fx.RequestSettings(); EnterPassword(fx.App.WaitForWindow(fx.Automation, "Protected Access"), AppFixture.TestPassword);
-        settings = fx.App.WaitForWindow(fx.Automation, "ScreenTime Settings");
+        settings.FindButton("Settings 🔓").Invoke();
+        Assert.DoesNotContain(fx.App.GetAllTopLevelWindows(fx.Automation), w => w.Title == "Protected Access");
         settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(ControlType.TabItem))).AsTabItem().Select();
         settings.FindButton("Reset to defaults").Invoke();
         settings.FindButton("Cancel").Invoke();

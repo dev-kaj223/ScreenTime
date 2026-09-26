@@ -80,6 +80,34 @@ public class TrayPresentationTests
     }
 
     [Fact]
+    public void RightTrayGesture_RequestsPopupAndNeverRequestsMainWindow()
+    {
+        Sta(() =>
+        {
+            _ = new StatusPanel();
+            var branding = new ResourceDictionary { Source = new Uri("/ScreenTime;component/Branding/ScreenTimeBranding.xaml", UriKind.Relative) };
+            var dashboards = 0;
+            using var tray = new TrayIconService(() => new(Now, []), () => { }, () => Task.CompletedTask,
+                (ImageSource)branding["ScreenTimeBrandImage"], dashboard: () => dashboards++);
+            tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Right);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Right);
+            Assert.NotNull(tray.Panel);
+            Assert.Equal(0, dashboards);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left); // shell-generated unmatched event
+            Assert.Equal(0, dashboards);
+            tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Right);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Right);
+            Assert.Null(tray.Panel);
+            Assert.Equal(0, dashboards);
+            // A genuine left gesture immediately after right must still open Today.
+            tray.HandleMouseDown(System.Windows.Forms.MouseButtons.Left);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left);
+            tray.HandleMouseUp(System.Windows.Forms.MouseButtons.Left); // duplicate up is ignored
+            Assert.Equal(1, dashboards);
+        });
+    }
+
+    [Fact]
     public void BoundedReadOnlyLayout_SharedBranding_TraySingleton_CloseAndDispose()
     {
         Sta(() =>
@@ -148,6 +176,143 @@ public class TrayPresentationTests
             window.Close();
         });
     }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(12)]
+    public void Popup_FirstOpaqueFrame_IsAlreadyAtClampedAnchor(int appCount)
+    {
+        Sta(() =>
+        {
+            Assert.True(GetCursorPos(out var anchor));
+            var monitor = new PlacementMonitor { Size = System.Runtime.InteropServices.Marshal.SizeOf<PlacementMonitor>() };
+            Assert.True(GetMonitorInfo(MonitorFromPoint(anchor, 2), ref monitor));
+            var model = new StatusViewModel();
+            model.Refresh(new(Now, Enumerable.Range(0, appCount).Select(i => Status("App " + i)).ToArray()), Now);
+            var panel = new StatusPanel { DataContext = model };
+            Assert.True(panel.AllowsTransparency);
+            Assert.Equal(0, panel.Opacity);
+            var revealed = false;
+            var opacity = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(UIElement.OpacityProperty, typeof(StatusPanel));
+            EventHandler onReveal = (_, _) =>
+            {
+                if (panel.Opacity == 0) return;
+                Assert.True(GetWindowRect(new System.Windows.Interop.WindowInteropHelper(panel).Handle, out var bounds));
+                var area = monitor.Work;
+                var width = bounds.Right - bounds.Left;
+                var height = bounds.Bottom - bounds.Top;
+                var x = anchor.X < area.Left + (area.Right - area.Left) / 2 ? anchor.X + 12 : anchor.X - width - 12;
+                var y = anchor.Y < area.Top + (area.Bottom - area.Top) / 2 ? anchor.Y + 12 : anchor.Y - height - 12;
+                Assert.Equal(Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - width)), bounds.Left);
+                Assert.Equal(Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - height)), bounds.Top);
+                Assert.InRange(bounds.Right, area.Left, area.Right);
+                Assert.InRange(bounds.Bottom, area.Top, area.Bottom);
+                revealed = true;
+            };
+            opacity.AddValueChanged(panel, onReveal);
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            timer.Tick += (_, _) => { if (revealed || DateTime.UtcNow >= deadline) frame.Continue = false; };
+            try
+            {
+                panel.Show();
+                Assert.Equal(0, panel.Opacity); // Show cannot expose the initial default location.
+                timer.Start();
+                System.Windows.Threading.Dispatcher.PushFrame(frame);
+                Assert.True(revealed, "Popup must become opaque only after successful native placement.");
+            }
+            finally { timer.Stop(); opacity.RemoveValueChanged(panel, onReveal); panel.Close(); }
+        });
+    }
+
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Popup_InitialPlacement_BoundedRetry_RevealsOnceOrCloses(int failures)
+    {
+        Sta(() =>
+        {
+            var attempts = 0;
+            var initialAttempts = 0;
+            var reveals = 0;
+            var closed = false;
+            StatusPanel? panel = null;
+            panel = new StatusPanel(place =>
+            {
+                attempts++;
+                if (panel!.Opacity == 0) initialAttempts++;
+                if (attempts <= failures)
+                {
+                    Assert.Equal(0, panel.Opacity);
+                    return false;
+                }
+                return place(); // Success still exercises native tray/work-area placement.
+            });
+            panel.Closed += (_, _) => closed = true;
+            var opacity = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(UIElement.OpacityProperty, typeof(StatusPanel));
+            EventHandler onReveal = (_, _) => { if (panel.Opacity == 1) reveals++; };
+            opacity.AddValueChanged(panel, onReveal);
+            void PumpUntil(Func<bool> complete)
+            {
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                timer.Tick += (_, _) => { if (complete() || DateTime.UtcNow >= deadline) frame.Continue = false; };
+                try { timer.Start(); System.Windows.Threading.Dispatcher.PushFrame(frame); }
+                finally { timer.Stop(); }
+                Assert.True(complete(), "Placement must reach a visible or closed state within the bound.");
+            }
+            try
+            {
+                panel.Show();
+                Assert.Equal(0, panel.Opacity);
+                PumpUntil(() => closed || reveals > 0);
+                Assert.Equal(Math.Min(failures + 1, 2), initialAttempts);
+                if (failures == 2)
+                {
+                    Assert.True(closed);
+                    Assert.False(panel.IsVisible);
+                    Assert.Equal(0, reveals);
+                    Assert.Equal(2, attempts);
+                    var drained = false;
+                    panel.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                        new Action(() => drained = true));
+                    PumpUntil(() => drained);
+                    Assert.Equal(2, attempts); // No queued work retries a closed popup.
+                }
+                else
+                {
+                    Assert.False(closed);
+                    Assert.True(panel.IsVisible);
+                    Assert.Equal(1, panel.Opacity);
+                    Assert.Equal(1, reveals);
+                    var previousAttempts = attempts;
+                    panel.Width -= 1; // Subsequent layout still places without revealing again.
+                    PumpUntil(() => attempts > previousAttempts);
+                    Assert.Equal(1, reveals);
+                    Assert.Equal(failures + 1, initialAttempts);
+                }
+            }
+            finally { opacity.RemoveValueChanged(panel, onReveal); if (!closed) panel.Close(); }
+        });
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct PlacementPoint { public int X, Y; }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct PlacementRect { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct PlacementMonitor { public int Size; public PlacementRect Monitor, Work; public uint Flags; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out PlacementPoint point);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(PlacementPoint point, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref PlacementMonitor info);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out PlacementRect bounds);
 
     internal static void Sta(Action action)
     {

@@ -30,7 +30,8 @@ public partial class App : WpfApplication
     private EventWaitHandle? _statusEvent;
     private EventWaitHandle? _exitEvent;
     private EventWaitHandle? _dashboardEvent;
-    private UI.DashboardWindow? _dashboard;
+    private UI.SettingsWindow? _mainWindow;
+    private string? _lastRules;
     private TimeGuard.Models.NotificationPreferences _notificationPreferences = TimeGuard.Models.NotificationPreferences.Standard;
 
     protected override void OnStartup(StartupEventArgs e)
@@ -84,6 +85,7 @@ public partial class App : WpfApplication
             if (_runtime.Profile == RuntimeProfile.Production && _db.GetSetting("SettingsHotkey") is null)
                 _db.SetSetting("SettingsHotkey", "Ctrl+Alt+S");
             var config = _db.LoadConfig();
+            _lastRules = System.Text.Json.JsonSerializer.Serialize(config.Rules);
             var completedFirstRun = false;
             if (config.IsFirstRun)
             {
@@ -231,53 +233,51 @@ public partial class App : WpfApplication
 
     private void OpenSettings()
     {
-        _access?.OpenSettings();
+        if (_stopping) return;
+        EnsureMainWindow();
+        if (_mainWindow?.IsSettingsUnlocked == true) _mainWindow.EnterSettings();
+        else _access?.OpenSettings();
     }
 
     private void OpenAuthorizedSettings()
     {
-        var before = System.Text.Json.JsonSerializer.Serialize(_db!.LoadConfig().Rules);
-        new UI.SettingsWindow(_db!, _runtime, OpenDashboard).ShowDialog();
-        if (_stopping) return;
+        EnsureMainWindow();
+        _mainWindow?.EnterSettings();
+    }
+
+    private void ApplySettingsChanges()
+    {
         _notificationPreferences = new NotificationPreferenceStore(_runtime.Paths, _logger).Load();
-        var config = _db.LoadConfig();
+        var config = _db!.LoadConfig();
+        var rules = System.Text.Json.JsonSerializer.Serialize(config.Rules);
         // Presentation-only settings never rebase measured usage or invalidate policy facts.
-        if (before != System.Text.Json.JsonSerializer.Serialize(config.Rules)) _monitor?.ReloadConfig(config);
+        if (_lastRules != rules) { _monitor?.ReloadConfig(config); _lastRules = rules; }
     }
 
     private void OpenDashboard()
     {
         if (_stopping) return;
-        // Explicit navigation to the read-only Dashboard cancels protected dialogs,
-        // then lets their modal frames unwind before activating the existing window.
-        var protectedWindow = Windows.OfType<Window>().FirstOrDefault(w => w.IsVisible &&
-            w is UI.SettingsWindow or UI.PasswordPromptWindow);
-        if (protectedWindow is not null)
+        // An explicit Today command cancels only the password challenge. Keep
+        // rule editors modal so unsaved edits remain under their own Cancel flow.
+        foreach (var prompt in Windows.OfType<UI.PasswordPromptWindow>().Where(w => w.IsVisible).ToArray())
+            prompt.Close();
+        EnsureMainWindow();
+        _mainWindow?.EnterToday();
+    }
+
+    private void EnsureMainWindow()
+    {
+        if (_stopping) return;
+        if (_mainWindow is null)
         {
-            // End nested WPF modal frames explicitly, innermost first. Closing only
-            // their owner can remove their HWNDs while leaving ShowDialog on the stack.
-            var child = protectedWindow;
-            while (child.OwnedWindows.OfType<Window>().LastOrDefault(w => w.IsVisible) is { } owned)
-                child = owned;
-            if (child != protectedWindow)
-            {
-                child.Close();
-                Dispatcher.BeginInvoke(new Action(OpenDashboard));
-                return;
-            }
-            protectedWindow.Close();
-            Dispatcher.BeginInvoke(new Action(OpenDashboard));
-            return;
-        }
-        if (_dashboard is null)
-        {
-            var window = new UI.DashboardWindow(_db!, () => _monitor?.Status);
-            _dashboard = window;
-            window.Closed += (_, _) => { if (_dashboard == window) _dashboard = null; };
+            var window = new UI.SettingsWindow(_db!, _runtime, OpenSettings,
+                ApplySettingsChanges, () => _monitor?.Status);
+            _mainWindow = window;
+            window.Closed += (_, _) => { if (_mainWindow == window) _mainWindow = null; };
             window.Show();
         }
-        if (_dashboard.WindowState == WindowState.Minimized) _dashboard.WindowState = WindowState.Normal;
-        _dashboard.Activate();
+        if (_mainWindow.WindowState == WindowState.Minimized) _mainWindow.WindowState = WindowState.Normal;
+        _mainWindow.Activate();
     }
 
     protected override void OnExit(ExitEventArgs e)

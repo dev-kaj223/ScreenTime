@@ -95,10 +95,12 @@ public class FirstRunWindowTests : IDisposable
         if (!closed)
             _output.WriteLine("Validation: " + win.FindFirstDescendant(cf => cf.ByAutomationId("ErrorText"))?.Name);
         Assert.True(closed, "FirstRunWindow should have closed after valid password setup.");
-        var settings = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
+        var settings = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
         Assert.DoesNotContain(_fx.App.GetAllTopLevelWindows(_fx.Automation), w => w.Title == "Protected Access");
-        settings.FindButton("Cancel").Invoke();
-        Assert.True(SpinWait.SpinUntil(() => !_fx.App.GetAllTopLevelWindows(_fx.Automation).Any(w => w.Title == "ScreenTime Settings"), TimeSpan.FromSeconds(3)));
+        Assert.NotNull(settings.FindButton("Settings 🔓"));
+        Assert.NotNull(settings.FindButton("➕ Add Rule"));
+        settings.Close();
+        Assert.True(SpinWait.SpinUntil(() => !_fx.App.GetAllTopLevelWindows(_fx.Automation).Any(w => w.Title == "ScreenTime — Main"), TimeSpan.FromSeconds(3)));
         _fx.RequestSettings();
         var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
         prompt.Close();

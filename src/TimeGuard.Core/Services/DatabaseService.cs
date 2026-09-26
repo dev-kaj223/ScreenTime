@@ -437,6 +437,24 @@ public class DatabaseService : IStateStore
 
     // ── History (for dashboard) ───────────────────────────────────────────────
 
+    /// <summary>Bounded read-only history for configured enabled applications.</summary>
+    public IReadOnlyList<(DateOnly Bucket, string ProcessName, double UsageMins)> LoadUsageHistory(
+        DateOnly start, DateOnly end, bool monthly)
+    {
+        if (end < start) throw new ArgumentOutOfRangeException(nameof(end));
+        using var conn = Open();
+        var bucket = monthly ? "substr(d.Date, 1, 7) || '-01'" : "d.Date";
+        return conn.Query<(string Bucket, string ProcessName, double UsageMins)>($"""
+            SELECT {bucket} AS Bucket, d.ProcessName, SUM(d.UsageMins) AS UsageMins
+            FROM DailyUsage d
+            INNER JOIN AppRules r ON lower(r.ProcessName) = lower(d.ProcessName) AND r.Enabled = 1
+            WHERE d.Date >= @start AND d.Date <= @end AND d.UsageMins > 0
+            GROUP BY {bucket}, lower(d.ProcessName)
+            ORDER BY Bucket, d.ProcessName
+            """, new { start = start.ToString("yyyy-MM-dd"), end = end.ToString("yyyy-MM-dd") })
+            .Select(r => (DateOnly.Parse(r.Bucket), r.ProcessName, r.UsageMins)).ToList();
+    }
+
     public IReadOnlyList<DailyLog> LoadRecentLogs(int days = 30)
     {
         var result = new List<DailyLog>();

@@ -13,9 +13,16 @@ public partial class StatusPanel : Window
     private bool _closing;
     internal bool DismissedByDeactivation { get; private set; }
     private bool _placementQueued;
+    private bool _placementChanged;
+    private bool _revealed;
+    private int _initialPlacementAttempts;
+    private readonly Func<Func<bool>, bool> _attemptPlacement;
     private readonly Point _anchor;
-    public StatusPanel()
+    public StatusPanel() : this(place => place()) { }
+
+    internal StatusPanel(Func<Func<bool>, bool> attemptPlacement)
     {
+        _attemptPlacement = attemptPlacement;
         InitializeComponent();
         NativeGetCursorPos(out _anchor);
         Deactivated += (_, _) => { if (!_closing) { DismissedByDeactivation = true; Close(); } };
@@ -36,22 +43,44 @@ public partial class StatusPanel : Window
 
     private void QueuePlacement()
     {
-        if (_placementQueued) return;
+        if (_closing) return;
+        if (_placementQueued) { _placementChanged = true; return; }
         _placementQueued = true;
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
-        { _placementQueued = false; if (IsVisible) PlaceNearTray(); }));
+        _placementChanged = false;
+        var priority = !_revealed && _initialPlacementAttempts == 1
+            ? System.Windows.Threading.DispatcherPriority.ContextIdle
+            : System.Windows.Threading.DispatcherPriority.Background;
+        Dispatcher.BeginInvoke(priority, new Action(() =>
+        {
+            // SizeToContent needs its first layout/render pass. Stay transparent until
+            // the native bounds are placed so the default position never becomes visible.
+            try
+            {
+                if (_closing || !IsVisible) return;
+                if (!_revealed) _initialPlacementAttempts++;
+                var placed = _attemptPlacement(PlaceNearTray);
+                if (!_revealed && placed)
+                {
+                    _revealed = true;
+                    Opacity = 1;
+                }
+                else if (!_revealed && _initialPlacementAttempts == 2) Close();
+            }
+            finally { _placementQueued = false; }
+            if ((!_revealed || _placementChanged) && !_closing && IsVisible) QueuePlacement();
+        }));
     }
 
-    private void PlaceNearTray()
+    private bool PlaceNearTray()
     {
-        if (_placing) return;
+        if (_placing) return false;
         _placing = true;
         try
         {
             var hwnd = new WindowInteropHelper(this).Handle;
             var cursor = _anchor;
             var monitor = new MonitorInfo { Size = System.Runtime.InteropServices.Marshal.SizeOf<MonitorInfo>() };
-            if (!NativeGetMonitorInfo(NativeMonitorFromPoint(cursor, 2), ref monitor)) return;
+            if (!NativeGetMonitorInfo(NativeMonitorFromPoint(cursor, 2), ref monitor)) return false;
             var area = monitor.Work;
             var dpi = VisualTreeHelper.GetDpi(this);
             MaxHeight = Math.Min(650, (area.Bottom - area.Top) / dpi.DpiScaleY - 16);
@@ -60,7 +89,7 @@ public partial class StatusPanel : Window
             UpdateLayout();
             // SizeToContent can finish after Loaded. Read the actual native bounds after rendering
             // and on subsequent size changes rather than projecting an early WPF DesiredSize.
-            if (!NativeGetWindowRect(hwnd, out var bounds)) return;
+            if (!NativeGetWindowRect(hwnd, out var bounds)) return false;
             var width = bounds.Right - bounds.Left;
             var height = bounds.Bottom - bounds.Top;
             // Leave the invoking icon/cursor clear, including icons in Explorer's overflow.
@@ -68,7 +97,7 @@ public partial class StatusPanel : Window
             var y = cursor.Y < area.Top + (area.Bottom - area.Top) / 2 ? cursor.Y + 12 : cursor.Y - height - 12;
             x = Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - width));
             y = Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - height));
-            NativeSetWindowPos(hwnd, new IntPtr(-1), x, y,
+            return NativeSetWindowPos(hwnd, new IntPtr(-1), x, y,
                 0, 0, 0x1 | 0x10); // NOSIZE | NOACTIVATE; temporary user-opened popup above shell overflow
         }
         finally { _placing = false; }

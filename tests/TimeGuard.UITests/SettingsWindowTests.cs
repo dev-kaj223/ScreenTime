@@ -52,7 +52,7 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
 
         prompt.FindButton("Unlock").Click();
 
-        return _fx.App.WaitForWindow(_fx.Automation, "ScreenTime Settings");
+        return _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
     }
 
     // ── Tests ─────────────────────────────────────────────────────────────────
@@ -61,7 +61,9 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
     public void Settings_OpensAfterCorrectPassword()
     {
         var settings = OpenSettingsWindow();
-        Assert.Contains("Settings", settings.Title);
+        Assert.Equal("ScreenTime — Main", settings.Title);
+        Assert.NotNull(settings.FindButton("Settings 🔓"));
+        Assert.NotNull(settings.FindButton("➕ Add Rule"));
         settings.Close();
     }
 
@@ -84,28 +86,31 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
     }
 
     [Fact]
-    public void Settings_CancelButton_ClosesWindow()
+    public void Settings_CancelButton_ReturnsToTodayInSameWindow()
     {
         var settings = OpenSettingsWindow();
         settings.FindButton("Cancel").Click();
         Thread.Sleep(500);
 
-        var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
-        Assert.False(windows.Any(w => w.Title?.Contains("Settings") == true),
-            "SettingsWindow should close on Cancel.");
+        Assert.NotNull(settings.FindTextContaining("Last 7 Days"));
+        Assert.Equal(settings.Properties.NativeWindowHandle.Value,
+            Assert.Single(_fx.App.GetAllTopLevelWindows(_fx.Automation).Where(w => w.Title == "ScreenTime — Main"))
+                .Properties.NativeWindowHandle.Value);
     }
 
     [Fact]
-    public void Settings_DashboardButton_OpensDashboard()
+    public void Settings_UsageButton_NavigatesWithinSameWindow()
     {
         var settings = OpenSettingsWindow();
-        settings.FindButton("📊 Dashboard").Click();
+        var handle = settings.Properties.NativeWindowHandle.Value;
+        settings.FindButton("Usage").Click();
 
-        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
-        Assert.Contains("Dashboard", dashboard.Title);
+        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
+        Assert.Equal(handle, dashboard.Properties.NativeWindowHandle.Value);
 
+        Assert.NotNull(dashboard.FindTextContaining("ScreenTime / Usage"));
         Assert.True(dashboard.IsEnabled);
-        Assert.DoesNotContain(_fx.App.GetAllTopLevelWindows(_fx.Automation), w => w.Title == "ScreenTime Settings");
+        Assert.Single(_fx.App.GetAllTopLevelWindows(_fx.Automation).Where(w => w.Title == "ScreenTime — Main"));
         dashboard.Close();
     }
 
@@ -117,15 +122,20 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         for (var iteration = 0; iteration < 3; iteration++)
         {
         using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
-        var existing = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
+        var existing = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
         var hwnd = existing.Properties.NativeWindowHandle.Value;
+        var bounds = existing.BoundingRectangle;
         var settings = OpenSettingsWindow();
+        Assert.Equal(bounds, settings.BoundingRectangle);
         if (tray) { using var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName); signal.Set(); }
-        else settings.FindButton("📊 Dashboard").Invoke();
-        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
+        else settings.FindButton("Usage").Invoke();
+        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
         Assert.True(SpinWait.SpinUntil(() => dashboard.IsEnabled, TimeSpan.FromSeconds(3)));
         Assert.Equal(hwnd, dashboard.Properties.NativeWindowHandle.Value);
-        Assert.Single(_fx.App.GetAllTopLevelWindows(_fx.Automation).Where(w => w.Title.Contains("Usage Dashboard")));
+        Assert.Equal(bounds, dashboard.BoundingRectangle);
+        Assert.Single(_fx.App.GetAllTopLevelWindows(_fx.Automation).Where(w => w.Title.Contains("ScreenTime — Main")));
+        dashboard.FindButton("Settings 🔓").Invoke();
+        Assert.NotNull(dashboard.FindButton("➕ Add Rule"));
         dashboard.Close();
         Assert.False(_fx.App.HasExited);
         // The same process must accept a fresh protected command after modal navigation.
@@ -149,91 +159,45 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         Assert.Equal("123", _fx.OpenDatabase().GetSetting("OverallDailyLimitMinutes"));
     }
 
-    [Theory]
-    [InlineData("picker")]
-    [InlineData("editor")]
-    [InlineData("confirmation")]
-    public void Dashboard_CancelsNestedProtectedFlow_ThenAllowsFreshPickerAndEnforcement(string nested)
+    [Fact]
+    public void UnsavedNotificationChanges_UseSaveDiscardCancelBeforeTodayOrClose()
     {
-        var db = _fx.OpenDatabase();
-        db.SaveRule(new() { ProcessName = "nested-navigation", DisplayName = "Nested navigation", DailyLimitMinutes = 60 });
-        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
-        var dashboard = _fx.App.WaitForWindow(_fx.Automation, "Usage Dashboard");
         var settings = OpenSettingsWindow();
-        var before = System.Text.Json.JsonSerializer.Serialize(db.LoadConfig().Rules);
-        string title;
-        if (nested == "picker") { settings.FindButton("🔍 Pick Process").Invoke(); title = "Pick a Running Process"; }
-        else if (nested == "editor") { settings.FindButton("➕ Add Rule").Invoke(); title = "Edit App Rule"; }
-        else
-        {
-            settings.FindFirstDescendant(cf => cf.ByAutomationId("RulesGrid"))
-                .FindAllDescendants(cf => cf.ByControlType(FlaUI.Core.Definitions.ControlType.DataItem))
-                .Single(row => row.FindTextContaining("Nested navigation") is not null).Patterns.SelectionItem.Pattern.Select();
-            settings.FindButton("🗑️ Delete").Invoke(); title = "Confirm";
-        }
-        _fx.App.WaitForWindow(_fx.Automation, title);
-        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
-        Assert.True(SpinWait.SpinUntil(() => dashboard.IsEnabled &&
-            _fx.App.GetAllTopLevelWindows(_fx.Automation).All(w => w.Title.Contains("Usage Dashboard")), TimeSpan.FromSeconds(5)),
-            "Dashboard navigation must unwind all protected modal windows.");
+        var handle = settings.Properties.NativeWindowHandle.Value;
+        settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(FlaUI.Core.Definitions.ControlType.TabItem))).AsTabItem().Select();
+        settings.FindFirstDescendant(cf => cf.ByAutomationId("PresetBox")).AsComboBox().Select("Minimal");
+        settings.FindButton("Usage").Invoke();
+        var confirmation = _fx.App.WaitForWindow(_fx.Automation, "Unsaved Settings");
+        confirmation.FindButton("Cancel").Invoke();
+        Assert.NotNull(settings.FindButton("Save"));
+        settings.FindButton("Usage").Invoke();
+        confirmation = _fx.App.WaitForWindow(_fx.Automation, "Unsaved Settings");
+        confirmation.FindButton("No").Invoke();
+        Assert.NotNull(settings.FindTextContaining("Last 7 Days"));
+        Assert.Equal(handle, settings.Properties.NativeWindowHandle.Value);
         Assert.False(_fx.App.HasExited);
-        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(db.LoadConfig().Rules));
-
-        // A fresh picker must still select an owned helper and cancel normally after navigation.
-        var helper = _fx.LaunchHelper(headless: true);
-        settings = OpenSettingsWindow();
-        settings.FindButton("🔍 Pick Process").Invoke();
-        var picker = _fx.App.WaitForWindow(_fx.Automation, "Pick a Running Process");
-        picker.FindTextBox("SearchBox").AsTextBox().Text = "screentime.testprocess";
-        var list = picker.FindFirstDescendant(cf => cf.ByAutomationId("ProcessList")).AsListBox();
-        Assert.True(SpinWait.SpinUntil(() => list.Items.Length == 1, TimeSpan.FromSeconds(3)));
-        list.Items[0].Select(); picker.FindButton("Select").Invoke();
-        _fx.App.WaitForWindow(_fx.Automation, "Edit App Rule").FindButton("Cancel").Invoke();
-        Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)));
-        settings.FindButton("🔍 Pick Process").Invoke();
-        _fx.App.WaitForWindow(_fx.Automation, "Pick a Running Process").FindButton("Cancel").Invoke();
-        Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)));
-        Assert.Equal(before, System.Text.Json.JsonSerializer.Serialize(db.LoadConfig().Rules));
-        // Stop this exact owned helper before adding current downtime, then verify a new instance is denied.
-        using (var owned = Process.GetProcessById(helper.Id))
-        {
-            _ = owned.Handle;
-            Assert.True(helper.Matches(owned)); owned.Kill(); Assert.True(owned.WaitForExit(3000));
-        }
-        db.SaveRule(new() { ProcessName = "screentime.testprocess", DisplayName = "Owned enforcement helper", DailyLimitMinutes = 1,
-            BlockedPeriods = [new() { StartDayOfWeek = DateTime.Today.DayOfWeek, StartMinute = 0, EndMinute = 0, EndDayOffset = 1 }] });
-        string WindowIdentities() => $"fixture PID={_fx.App.ProcessId}; exited={_fx.App.HasExited}; " +
-            string.Join(" | ", _fx.App.GetAllTopLevelWindows(_fx.Automation).Select(w =>
-                $"title='{w.Title}', HWND={w.Properties.NativeWindowHandle.Value}, enabled={w.IsEnabled}, PID={w.Properties.ProcessId.Value}"));
-        var settingsHandle = settings.Properties.NativeWindowHandle.Value;
-        var dashboardHandle = dashboard.Properties.NativeWindowHandle.Value;
+        settings.FindButton("Settings 🔓").Invoke();
+        settings.FindFirstDescendant(cf => cf.ByName("App Rules").And(cf.ByControlType(FlaUI.Core.Definitions.ControlType.TabItem))).AsTabItem().Select();
+        Assert.NotNull(settings.FindButton("➕ Add Rule"));
         settings.Close();
-        var settingsGoneAndDashboardReady = SpinWait.SpinUntil(() =>
-        {
-            var windows = _fx.App.GetAllTopLevelWindows(_fx.Automation);
-            return windows.All(w => w.Properties.NativeWindowHandle.Value != settingsHandle) &&
-                windows.SingleOrDefault(w => w.Properties.NativeWindowHandle.Value == dashboardHandle)?.IsEnabled == true;
-        }, TimeSpan.FromSeconds(3));
-        var afterSettings = WindowIdentities();
-        output.WriteLine("After Settings close: " + afterSettings);
-        Assert.True(settingsGoneAndDashboardReady, "Settings must be gone and its existing Dashboard enabled before closing Dashboard. " + afterSettings);
-        dashboard.Close();
-        var allGone = SpinWait.SpinUntil(() => _fx.App.GetAllTopLevelWindows(_fx.Automation).Length == 0, TimeSpan.FromSeconds(3));
-        var afterDashboard = WindowIdentities();
-        output.WriteLine("After Dashboard close: " + afterDashboard);
-        Assert.True(allGone, "All fixture windows must close. " + afterDashboard);
-        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.StatusEventName)) signal.Set();
-        Window? status = null;
-        var observed = SpinWait.SpinUntil(() =>
-        {
-            status = _fx.App.GetAllTopLevelWindows(_fx.Automation).SingleOrDefault(w => w.Title == "ScreenTime");
-            return status?.FindTextContaining("Owned enforcement helper") is not null && status.FindTextContaining("DOWNTIME") is not null;
-        }, TimeSpan.FromSeconds(5));
-        output.WriteLine("Enforcement status: " + string.Join(" | ", status?.FindAllDescendants().Select(e => e.Name) ?? []));
-        Assert.True(observed);
-        status!.Close();
-        var denied = _fx.LaunchHelper(headless: true);
-        using var process = Process.GetProcessById(denied.Id);
-        Assert.True(process.WaitForExit(8000)); Assert.False(_fx.App.HasExited);
+        _fx.RequestSettings();
+        var prompt = _fx.App.WaitForWindow(_fx.Automation, "Protected Access");
+        prompt.Close();
+    }
+
+    [Fact]
+    public void NestedRuleEditor_RemainsModalUntilExplicitlyCancelled()
+    {
+        var settings = OpenSettingsWindow();
+        settings.FindButton("➕ Add Rule").Invoke();
+        var editor = _fx.App.WaitForWindow(_fx.Automation, "Edit App Rule");
+        using (var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName)) signal.Set();
+        Assert.NotNull(_fx.App.WaitForWindow(_fx.Automation, "Edit App Rule"));
+        editor.FindButton("Cancel").Invoke();
+        Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)));
+        settings.FindButton("Usage").Invoke();
+        Assert.NotNull(settings.FindTextContaining("Last 7 Days"));
+        settings.Close();
+        Assert.False(_fx.App.HasExited);
     }
 }
