@@ -14,7 +14,7 @@
       <StackPanel Orientation="Horizontal" Margin="24,18,24,0">
         <Image Source="{DynamicResource ScreenTimeBrandImage}" Width="30" Height="30"/>
         <TextBlock Text="ScreenTime" Foreground="{StaticResource TextBrush}" FontSize="24" FontWeight="SemiBold" Margin="10,0,24,0"/>
-        <Button x:Name="TodayButton" Content="Today" Style="{StaticResource SecondaryButton}" Click="OnViewDashboard" Margin="0,0,8,0"/>
+        <Button x:Name="TodayButton" Content="Usage" Style="{StaticResource SecondaryButton}" Click="OnViewDashboard" Margin="0,0,8,0"/>
         <Button x:Name="SettingsButton" Content="Settings 🔒" Style="{StaticResource SecondaryButton}" Click="OnViewSettings"/>
       </StackPanel>
       <ContentControl x:Name="TodayHost" Grid.Row="1"/>

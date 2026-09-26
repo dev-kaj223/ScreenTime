@@ -69,7 +69,7 @@ public class Beta2PopupTests(Xunit.Abstractions.ITestOutputHelper output)
         Keyboard.Type(AppFixture.TestPassword); prompt.FindButton("Unlock").Invoke();
         Assert.NotNull(dashboard.FindButton("Settings 🔓"));
         Assert.NotNull(dashboard.FindButton("➕ Add Rule"));
-        dashboard.FindButton("Today").Invoke();
+        dashboard.FindButton("Usage").Invoke();
         Signal(fx.Runtime.StatusEventName); popup = Popup(fx);
         ClickOwned(fx, popup, popup.FindButton("Exit")); Gone(fx);
         prompt = fx.App.WaitForWindow(fx.Automation, "Protected Access");

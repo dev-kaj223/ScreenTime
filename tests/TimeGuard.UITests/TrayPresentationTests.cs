@@ -177,6 +177,70 @@ public class TrayPresentationTests
         });
     }
 
+    [Theory]
+    [InlineData(1)]
+    [InlineData(12)]
+    public void Popup_FirstOpaqueFrame_IsAlreadyAtClampedAnchor(int appCount)
+    {
+        Sta(() =>
+        {
+            Assert.True(GetCursorPos(out var anchor));
+            var monitor = new PlacementMonitor { Size = System.Runtime.InteropServices.Marshal.SizeOf<PlacementMonitor>() };
+            Assert.True(GetMonitorInfo(MonitorFromPoint(anchor, 2), ref monitor));
+            var model = new StatusViewModel();
+            model.Refresh(new(Now, Enumerable.Range(0, appCount).Select(i => Status("App " + i)).ToArray()), Now);
+            var panel = new StatusPanel { DataContext = model };
+            Assert.True(panel.AllowsTransparency);
+            Assert.Equal(0, panel.Opacity);
+            var revealed = false;
+            var opacity = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(UIElement.OpacityProperty, typeof(StatusPanel));
+            EventHandler onReveal = (_, _) =>
+            {
+                if (panel.Opacity == 0) return;
+                Assert.True(GetWindowRect(new System.Windows.Interop.WindowInteropHelper(panel).Handle, out var bounds));
+                var area = monitor.Work;
+                var width = bounds.Right - bounds.Left;
+                var height = bounds.Bottom - bounds.Top;
+                var x = anchor.X < area.Left + (area.Right - area.Left) / 2 ? anchor.X + 12 : anchor.X - width - 12;
+                var y = anchor.Y < area.Top + (area.Bottom - area.Top) / 2 ? anchor.Y + 12 : anchor.Y - height - 12;
+                Assert.Equal(Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - width)), bounds.Left);
+                Assert.Equal(Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - height)), bounds.Top);
+                Assert.InRange(bounds.Right, area.Left, area.Right);
+                Assert.InRange(bounds.Bottom, area.Top, area.Bottom);
+                revealed = true;
+            };
+            opacity.AddValueChanged(panel, onReveal);
+            var frame = new System.Windows.Threading.DispatcherFrame();
+            var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+            var deadline = DateTime.UtcNow.AddSeconds(5);
+            timer.Tick += (_, _) => { if (revealed || DateTime.UtcNow >= deadline) frame.Continue = false; };
+            try
+            {
+                panel.Show();
+                Assert.Equal(0, panel.Opacity); // Show cannot expose the initial default location.
+                timer.Start();
+                System.Windows.Threading.Dispatcher.PushFrame(frame);
+                Assert.True(revealed, "Popup must become opaque only after successful native placement.");
+            }
+            finally { timer.Stop(); opacity.RemoveValueChanged(panel, onReveal); panel.Close(); }
+        });
+    }
+
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct PlacementPoint { public int X, Y; }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct PlacementRect { public int Left, Top, Right, Bottom; }
+    [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
+    private struct PlacementMonitor { public int Size; public PlacementRect Monitor, Work; public uint Flags; }
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetCursorPos(out PlacementPoint point);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern IntPtr MonitorFromPoint(PlacementPoint point, uint flags);
+    [System.Runtime.InteropServices.DllImport("user32.dll", EntryPoint = "GetMonitorInfoW")]
+    private static extern bool GetMonitorInfo(IntPtr monitor, ref PlacementMonitor info);
+    [System.Runtime.InteropServices.DllImport("user32.dll")]
+    private static extern bool GetWindowRect(IntPtr hwnd, out PlacementRect bounds);
+
     internal static void Sta(Action action)
     {
         Exception? error = null;

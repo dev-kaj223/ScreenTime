@@ -39,19 +39,24 @@ public partial class StatusPanel : Window
         if (_placementQueued) return;
         _placementQueued = true;
         Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
-        { _placementQueued = false; if (IsVisible) PlaceNearTray(); }));
+        {
+            _placementQueued = false;
+            // SizeToContent needs its first layout/render pass. Stay transparent until
+            // the native bounds are placed so the default position never becomes visible.
+            if (IsVisible && PlaceNearTray()) Opacity = 1;
+        }));
     }
 
-    private void PlaceNearTray()
+    private bool PlaceNearTray()
     {
-        if (_placing) return;
+        if (_placing) return false;
         _placing = true;
         try
         {
             var hwnd = new WindowInteropHelper(this).Handle;
             var cursor = _anchor;
             var monitor = new MonitorInfo { Size = System.Runtime.InteropServices.Marshal.SizeOf<MonitorInfo>() };
-            if (!NativeGetMonitorInfo(NativeMonitorFromPoint(cursor, 2), ref monitor)) return;
+            if (!NativeGetMonitorInfo(NativeMonitorFromPoint(cursor, 2), ref monitor)) return false;
             var area = monitor.Work;
             var dpi = VisualTreeHelper.GetDpi(this);
             MaxHeight = Math.Min(650, (area.Bottom - area.Top) / dpi.DpiScaleY - 16);
@@ -60,7 +65,7 @@ public partial class StatusPanel : Window
             UpdateLayout();
             // SizeToContent can finish after Loaded. Read the actual native bounds after rendering
             // and on subsequent size changes rather than projecting an early WPF DesiredSize.
-            if (!NativeGetWindowRect(hwnd, out var bounds)) return;
+            if (!NativeGetWindowRect(hwnd, out var bounds)) return false;
             var width = bounds.Right - bounds.Left;
             var height = bounds.Bottom - bounds.Top;
             // Leave the invoking icon/cursor clear, including icons in Explorer's overflow.
@@ -68,7 +73,7 @@ public partial class StatusPanel : Window
             var y = cursor.Y < area.Top + (area.Bottom - area.Top) / 2 ? cursor.Y + 12 : cursor.Y - height - 12;
             x = Math.Clamp(x, area.Left, Math.Max(area.Left, area.Right - width));
             y = Math.Clamp(y, area.Top, Math.Max(area.Top, area.Bottom - height));
-            NativeSetWindowPos(hwnd, new IntPtr(-1), x, y,
+            return NativeSetWindowPos(hwnd, new IntPtr(-1), x, y,
                 0, 0, 0x1 | 0x10); // NOSIZE | NOACTIVATE; temporary user-opened popup above shell overflow
         }
         finally { _placing = false; }

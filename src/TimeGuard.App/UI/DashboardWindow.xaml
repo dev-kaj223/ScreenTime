@@ -6,7 +6,7 @@
     <ScrollViewer VerticalScrollBarVisibility="Auto"><StackPanel Margin="24">
         <StackPanel Orientation="Horizontal" Margin="0,0,0,18">
             <Image Source="{DynamicResource ScreenTimeBrandImage}" Width="30" Height="30"/>
-            <TextBlock Text="ScreenTime / Today" Foreground="{StaticResource TextBrush}" FontSize="24" FontWeight="SemiBold" Margin="10,0,0,0"/>
+            <TextBlock Text="ScreenTime / Usage" Foreground="{StaticResource TextBrush}" FontSize="24" FontWeight="SemiBold" Margin="10,0,0,0"/>
         </StackPanel>
         <TextBlock Text="{Binding Summary}" Foreground="{StaticResource SubtextBrush}" Margin="0,0,0,12" TextWrapping="Wrap"/>
         <ScrollViewer MaxHeight="245" VerticalScrollBarVisibility="Auto" Margin="0,0,0,20">

@@ -99,15 +99,16 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
     }
 
     [Fact]
-    public void Settings_TodayButton_NavigatesWithinSameWindow()
+    public void Settings_UsageButton_NavigatesWithinSameWindow()
     {
         var settings = OpenSettingsWindow();
         var handle = settings.Properties.NativeWindowHandle.Value;
-        settings.FindButton("Today").Click();
+        settings.FindButton("Usage").Click();
 
         var dashboard = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
         Assert.Equal(handle, dashboard.Properties.NativeWindowHandle.Value);
 
+        Assert.NotNull(dashboard.FindTextContaining("ScreenTime / Usage"));
         Assert.True(dashboard.IsEnabled);
         Assert.Single(_fx.App.GetAllTopLevelWindows(_fx.Automation).Where(w => w.Title == "ScreenTime — Main"));
         dashboard.Close();
@@ -127,7 +128,7 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         var settings = OpenSettingsWindow();
         Assert.Equal(bounds, settings.BoundingRectangle);
         if (tray) { using var signal = EventWaitHandle.OpenExisting(_fx.Runtime.DashboardEventName); signal.Set(); }
-        else settings.FindButton("Today").Invoke();
+        else settings.FindButton("Usage").Invoke();
         var dashboard = _fx.App.WaitForWindow(_fx.Automation, "ScreenTime — Main");
         Assert.True(SpinWait.SpinUntil(() => dashboard.IsEnabled, TimeSpan.FromSeconds(3)));
         Assert.Equal(hwnd, dashboard.Properties.NativeWindowHandle.Value);
@@ -165,11 +166,11 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         var handle = settings.Properties.NativeWindowHandle.Value;
         settings.FindFirstDescendant(cf => cf.ByName("Notifications").And(cf.ByControlType(FlaUI.Core.Definitions.ControlType.TabItem))).AsTabItem().Select();
         settings.FindFirstDescendant(cf => cf.ByAutomationId("PresetBox")).AsComboBox().Select("Minimal");
-        settings.FindButton("Today").Invoke();
+        settings.FindButton("Usage").Invoke();
         var confirmation = _fx.App.WaitForWindow(_fx.Automation, "Unsaved Settings");
         confirmation.FindButton("Cancel").Invoke();
         Assert.NotNull(settings.FindButton("Save"));
-        settings.FindButton("Today").Invoke();
+        settings.FindButton("Usage").Invoke();
         confirmation = _fx.App.WaitForWindow(_fx.Automation, "Unsaved Settings");
         confirmation.FindButton("No").Invoke();
         Assert.NotNull(settings.FindTextContaining("Last 7 Days"));
@@ -194,7 +195,7 @@ public class SettingsWindowTests(Xunit.Abstractions.ITestOutputHelper output) : 
         Assert.NotNull(_fx.App.WaitForWindow(_fx.Automation, "Edit App Rule"));
         editor.FindButton("Cancel").Invoke();
         Assert.True(SpinWait.SpinUntil(() => settings.IsEnabled, TimeSpan.FromSeconds(3)));
-        settings.FindButton("Today").Invoke();
+        settings.FindButton("Usage").Invoke();
         Assert.NotNull(settings.FindTextContaining("Last 7 Days"));
         settings.Close();
         Assert.False(_fx.App.HasExited);
