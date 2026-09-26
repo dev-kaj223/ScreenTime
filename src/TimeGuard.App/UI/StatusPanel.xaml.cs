@@ -13,9 +13,16 @@ public partial class StatusPanel : Window
     private bool _closing;
     internal bool DismissedByDeactivation { get; private set; }
     private bool _placementQueued;
+    private bool _placementChanged;
+    private bool _revealed;
+    private int _initialPlacementAttempts;
+    private readonly Func<Func<bool>, bool> _attemptPlacement;
     private readonly Point _anchor;
-    public StatusPanel()
+    public StatusPanel() : this(place => place()) { }
+
+    internal StatusPanel(Func<Func<bool>, bool> attemptPlacement)
     {
+        _attemptPlacement = attemptPlacement;
         InitializeComponent();
         NativeGetCursorPos(out _anchor);
         Deactivated += (_, _) => { if (!_closing) { DismissedByDeactivation = true; Close(); } };
@@ -36,14 +43,31 @@ public partial class StatusPanel : Window
 
     private void QueuePlacement()
     {
-        if (_placementQueued) return;
+        if (_closing) return;
+        if (_placementQueued) { _placementChanged = true; return; }
         _placementQueued = true;
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Background, new Action(() =>
+        _placementChanged = false;
+        var priority = !_revealed && _initialPlacementAttempts == 1
+            ? System.Windows.Threading.DispatcherPriority.ContextIdle
+            : System.Windows.Threading.DispatcherPriority.Background;
+        Dispatcher.BeginInvoke(priority, new Action(() =>
         {
-            _placementQueued = false;
             // SizeToContent needs its first layout/render pass. Stay transparent until
             // the native bounds are placed so the default position never becomes visible.
-            if (IsVisible && PlaceNearTray()) Opacity = 1;
+            try
+            {
+                if (_closing || !IsVisible) return;
+                if (!_revealed) _initialPlacementAttempts++;
+                var placed = _attemptPlacement(PlaceNearTray);
+                if (!_revealed && placed)
+                {
+                    _revealed = true;
+                    Opacity = 1;
+                }
+                else if (!_revealed && _initialPlacementAttempts == 2) Close();
+            }
+            finally { _placementQueued = false; }
+            if ((!_revealed || _placementChanged) && !_closing && IsVisible) QueuePlacement();
         }));
     }
 

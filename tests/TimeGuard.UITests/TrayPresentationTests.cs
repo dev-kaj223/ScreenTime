@@ -226,6 +226,79 @@ public class TrayPresentationTests
         });
     }
 
+    [Theory]
+    [InlineData(0)]
+    [InlineData(1)]
+    [InlineData(2)]
+    public void Popup_InitialPlacement_BoundedRetry_RevealsOnceOrCloses(int failures)
+    {
+        Sta(() =>
+        {
+            var attempts = 0;
+            var initialAttempts = 0;
+            var reveals = 0;
+            var closed = false;
+            StatusPanel? panel = null;
+            panel = new StatusPanel(place =>
+            {
+                attempts++;
+                if (panel!.Opacity == 0) initialAttempts++;
+                if (attempts <= failures)
+                {
+                    Assert.Equal(0, panel.Opacity);
+                    return false;
+                }
+                return place(); // Success still exercises native tray/work-area placement.
+            });
+            panel.Closed += (_, _) => closed = true;
+            var opacity = System.ComponentModel.DependencyPropertyDescriptor.FromProperty(UIElement.OpacityProperty, typeof(StatusPanel));
+            EventHandler onReveal = (_, _) => { if (panel.Opacity == 1) reveals++; };
+            opacity.AddValueChanged(panel, onReveal);
+            void PumpUntil(Func<bool> complete)
+            {
+                var frame = new System.Windows.Threading.DispatcherFrame();
+                var timer = new System.Windows.Threading.DispatcherTimer { Interval = TimeSpan.FromMilliseconds(10) };
+                var deadline = DateTime.UtcNow.AddSeconds(5);
+                timer.Tick += (_, _) => { if (complete() || DateTime.UtcNow >= deadline) frame.Continue = false; };
+                try { timer.Start(); System.Windows.Threading.Dispatcher.PushFrame(frame); }
+                finally { timer.Stop(); }
+                Assert.True(complete(), "Placement must reach a visible or closed state within the bound.");
+            }
+            try
+            {
+                panel.Show();
+                Assert.Equal(0, panel.Opacity);
+                PumpUntil(() => closed || reveals > 0);
+                Assert.Equal(Math.Min(failures + 1, 2), initialAttempts);
+                if (failures == 2)
+                {
+                    Assert.True(closed);
+                    Assert.False(panel.IsVisible);
+                    Assert.Equal(0, reveals);
+                    Assert.Equal(2, attempts);
+                    var drained = false;
+                    panel.Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.ApplicationIdle,
+                        new Action(() => drained = true));
+                    PumpUntil(() => drained);
+                    Assert.Equal(2, attempts); // No queued work retries a closed popup.
+                }
+                else
+                {
+                    Assert.False(closed);
+                    Assert.True(panel.IsVisible);
+                    Assert.Equal(1, panel.Opacity);
+                    Assert.Equal(1, reveals);
+                    var previousAttempts = attempts;
+                    panel.Width -= 1; // Subsequent layout still places without revealing again.
+                    PumpUntil(() => attempts > previousAttempts);
+                    Assert.Equal(1, reveals);
+                    Assert.Equal(failures + 1, initialAttempts);
+                }
+            }
+            finally { opacity.RemoveValueChanged(panel, onReveal); if (!closed) panel.Close(); }
+        });
+    }
+
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
     private struct PlacementPoint { public int X, Y; }
     [System.Runtime.InteropServices.StructLayout(System.Runtime.InteropServices.LayoutKind.Sequential)]
